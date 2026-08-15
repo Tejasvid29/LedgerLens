@@ -1,0 +1,21 @@
+{
+  "name": "ledgerlens",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @ledgerlens/api\" \"npm run dev -w @ledgerlens/web\"",
+    "dev:api": "npm run dev -w @ledgerlens/api",
+    "dev:web": "npm run dev -w @ledgerlens/web",
+    "build": "npm run build -w @ledgerlens/api && npm run build -w @ledgerlens/web",
+    "test": "npm run test -w @ledgerlens/api",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate -w @ledgerlens/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

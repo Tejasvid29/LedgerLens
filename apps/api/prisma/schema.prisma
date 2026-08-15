@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  wallets   Wallet[]
+  createdAt DateTime @default(now())
+}
+
+model Wallet {
+  id           String        @id @default(cuid())
+  address      String
+  label        String?
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  holdings     Holding[]
+  transactions Transaction[]
+  lastSyncedAt DateTime?
+
+  @@unique([userId, address])
+  @@index([address])
+}
+
+model Transaction {
+  id           String    @id @default(cuid())
+  walletId     String
+  wallet       Wallet    @relation(fields: [walletId], references: [id])
+  chainId      Int
+  hash         String
+  blockNumber  BigInt
+  timestamp    DateTime
+  direction    Direction
+  rawValue     String
+  decimals     Int
+  tokenSymbol  String
+  tokenAddress String?
+  gasUsed      String?
+  gasPriceWei  String?
+  status       TxStatus
+
+  @@unique([chainId, hash, walletId])
+  @@index([walletId, timestamp])
+}
+
+model Holding {
+  id           String   @id @default(cuid())
+  walletId     String
+  wallet       Wallet   @relation(fields: [walletId], references: [id])
+  chainId      Int
+  tokenAddress String?
+  tokenSymbol  String
+  rawBalance   String
+  decimals     Int
+  updatedAt    DateTime @updatedAt
+
+  @@unique([walletId, chainId, tokenAddress])
+}
+
+enum Direction {
+  IN
+  OUT
+  SELF
+}
+
+enum TxStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}

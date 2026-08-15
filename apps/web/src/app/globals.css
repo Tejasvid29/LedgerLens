@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper text-ink antialiased;
+  }
+}
+
+@layer components {
+  .tabular-amount {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  .ledger-row {
+    @apply border-b border-rule;
+  }
+
+  .ledger-row:nth-child(even) {
+    @apply bg-white/40;
+  }
+}

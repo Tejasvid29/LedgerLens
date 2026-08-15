@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ledgerlens
+          POSTGRES_PASSWORD: ledgerlens
+          POSTGRES_DB: ledgerlens
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql://ledgerlens:ledgerlens@localhost:5432/ledgerlens
+      REDIS_URL: redis://localhost:6379
+      ALCHEMY_API_KEY: test-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate -w @ledgerlens/api
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+
+      - name: Unit tests
+        run: npm run test -w @ledgerlens/api
+
+      - name: Build API
+        run: npm run build -w @ledgerlens/api
+
+      - name: Build web
+        run: npm run build -w @ledgerlens/web
