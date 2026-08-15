@@ -46,8 +46,6 @@ Open [http://localhost:3000](http://localhost:3000), add a wallet address, click
 
 ## Measurement protocol
 
-The resume claim (2.4s → 610ms) requires a measured before/after:
-
 1. **Before (baseline):** Load dashboard 20× with `?refresh=true` (bypasses cache, hits RPC). Record median page load in Chrome DevTools Performance.
 2. **After:** Repeat with cache warm (default refresh). Screenshot both, add to this README.
 
