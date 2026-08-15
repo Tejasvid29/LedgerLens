@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Alchemy, AssetTransfersCategory, Network } from 'alchemy-sdk';
+import { Alchemy, AssetTransfersCategory } from 'alchemy-sdk';
+import { NormalizedTransaction } from '@ledgerlens/shared';
 import { CHAINS, ChainConfig } from './chain.config';
-import { normalizeTransfer, RawAlchemyAssetTransfer } from './normalizer';
-import { NormalizedTransaction } from './normalizer';
+import { normalizeTransfers, RawAlchemyAssetTransfer } from './normalizer';
 
 @Injectable()
 export class AlchemyService {
@@ -39,23 +39,28 @@ export class AlchemyService {
       this.fetchDirection(alchemy, address, 'fromAddress'),
     ]);
 
-    const seen = new Set<string>();
-    const normalized: NormalizedTransaction[] = [];
-
-    for (const raw of [...incoming, ...outgoing]) {
-      const key = `${raw.hash}:${raw.category}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const tx = normalizeTransfer(raw, {
+    const { transactions, issues, duplicatesDropped } = normalizeTransfers(
+      [...incoming, ...outgoing],
+      {
         chainId: chain.chainId,
         nativeSymbol: chain.nativeSymbol,
         nativeDecimals: chain.nativeDecimals,
         walletAddress: address,
-      });
-      if (tx) normalized.push(tx);
+      },
+    );
+
+    if (issues.length > 0) {
+      const counts = issues.reduce<Record<string, number>>((acc, issue) => {
+        acc[issue.reason] = (acc[issue.reason] ?? 0) + 1;
+        return acc;
+      }, {});
+      this.logger.warn(
+        `${chainKey}: normalized ${transactions.length} transfers, ` +
+          `${duplicatesDropped} duplicates dropped, issues ${JSON.stringify(counts)}`,
+      );
     }
 
+    const normalized = [...transactions];
     normalized.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     return normalized;
   }
