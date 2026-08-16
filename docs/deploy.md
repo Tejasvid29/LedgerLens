@@ -1,13 +1,15 @@
 # Deploying LedgerLens
 
-Web app → Vercel. API + Postgres + Redis → AWS (ECS Fargate, RDS, ElastiCache). Errors → Sentry.
+Web app → Vercel. API + Postgres + Redis → Railway. Errors → Sentry.
 
-Everything in this repo (Dockerfile, ECS task definition, GitHub Actions workflow, env var wiring) is prepared and verified locally. The steps below are the ones that need your own accounts, credentials, and dashboards — nobody else can do these for you, which is why S18 in `SLICES.md` calls this slice "(mostly yourself)".
+Everything in this repo (Dockerfile, env var wiring) is prepared and verified locally. The steps below need your own accounts, credentials, and dashboards — nobody else can do these for you, which is why S18 in `SLICES.md` calls this slice "(mostly yourself)".
+
+Originally scoped for AWS ECS — the Dockerfile and ECS task definition still exist and still work (see the appendix), but for a project whose goal is "a live link, quickly," Railway gets there in minutes instead of hours with near-zero infrastructure debugging, for a few dollars a month instead of $50–100+. Same container, same image, much less surface area to get wrong.
 
 ## Prerequisites
 
 - A Vercel account, connected to this GitHub repo.
-- An AWS account with billing set up, and the AWS CLI configured locally (`aws configure`) with an IAM user that can create IAM roles, RDS/ElastiCache instances, ECR repos, and ECS resources.
+- A Railway account, connected to this GitHub repo.
 - A Sentry account (free tier is fine to start).
 - The repo pushed to GitHub already (it is).
 
@@ -40,111 +42,53 @@ Everything in this repo (Dockerfile, ECS task definition, GitHub Actions workflo
 
 ---
 
-## Part 2 — API + Postgres + Redis on AWS ECS
+## Part 2 — API + Postgres + Redis on Railway
 
-All commands below use the AWS CLI with your own credentials — replace `<ACCOUNT_ID>`, `<REGION>`, and the placeholder values throughout.
+### 2.1 — Create the project
 
-### 2.1 — RDS Postgres
+1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo** → pick this repo.
+2. Railway will try to auto-detect a service from the repo root — delete that first guess if it picks the wrong thing; you want one service pointed specifically at the API.
+3. On that service: **Settings → Build** → set **Builder** to `Dockerfile`, **Dockerfile Path** to `apps/api/Dockerfile`, and **Docker Build Context** to the repo root (`.`) — the Dockerfile needs the whole monorepo's `package.json` files, not just `apps/api`'s (see the Dockerfile's own comments).
+4. **Settings → Networking** → note the public domain Railway assigns (or add a custom one) — this is your API's public URL, used as `API_URL` in Vercel and as the redirect target nowhere else (the API has no redirect-based auth, only the signed-token scheme from S12).
 
-```
-aws rds create-db-instance \
-  --db-instance-identifier ledgerlens-db \
-  --db-instance-class db.t4g.micro \
-  --engine postgres \
-  --engine-version 16 \
-  --master-username ledgerlens \
-  --master-user-password '<choose-a-strong-password>' \
-  --allocated-storage 20 \
-  --publicly-accessible false \
-  --vpc-security-group-ids <your-security-group-id>
-```
+### 2.2 — Add Postgres and Redis
 
-Once available, your `DATABASE_URL` is:
-```
-postgresql://ledgerlens:<password>@<rds-endpoint>:5432/ledgerlens
-```
-
-### 2.2 — ElastiCache Redis
-
-```
-aws elasticache create-cache-cluster \
-  --cache-cluster-id ledgerlens-redis \
-  --engine redis \
-  --cache-node-type cache.t4g.micro \
-  --num-cache-nodes 1 \
-  --security-group-ids <your-security-group-id>
-```
-
-`REDIS_URL` is `redis://<elasticache-endpoint>:6379`. Redis failing open (rule 3 — see `CLAUDE.md`) means a Redis outage degrades latency, not availability, so a single node here is a reasonable place to start.
-
-### 2.3 — Secrets Manager
-
-Store everything the task definition references as a secret (`infra/ecs/task-definition.json`'s `secrets` array), not a plaintext `environment` entry:
-
-```
-for name in DATABASE_URL REDIS_URL ALCHEMY_API_KEY OPENAI_API_KEY API_AUTH_SECRET SENTRY_DSN; do
-  aws secretsmanager create-secret --name "ledgerlens/$name" --secret-string '<value>'
-done
-```
-
-(Run it once per variable with the real value substituted — the loop above is illustrative, not literal copy-paste.)
-
-### 2.4 — ECR repo + first image push
-
-```
-aws ecr create-repository --repository-name ledgerlens-api
-
-aws ecr get-login-password --region <REGION> | \
-  docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
-
-npm run docker:build:api
-docker tag ledgerlens-api:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/ledgerlens-api:latest
-docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/ledgerlens-api:latest
-```
-
-### 2.5 — IAM roles
-
-Two roles, both referenced in `infra/ecs/task-definition.json`:
-- **Execution role** (`ledgerlens-ecs-execution-role`): needs `AmazonECSTaskExecutionRolePolicy` plus `secretsmanager:GetSecretValue` on the `ledgerlens/*` secrets from 2.3 — this is what lets ECS itself pull the image and inject secrets at container start.
-- **Task role** (`ledgerlens-ecs-task-role`): what the running application itself is allowed to do. Empty policy is fine to start — the app doesn't call any AWS APIs directly.
-
-### 2.6 — ECS cluster, service, ALB
-
-```
-aws ecs create-cluster --cluster-name ledgerlens
-```
-
-Create an Application Load Balancer with a target group pointed at port 3001, health check path `/health` (see `apps/api/src/health/health.controller.ts` — deliberately dependency-free, see its comment for why). Then:
-
-1. Fill in `infra/ecs/task-definition.json`'s `<ACCOUNT_ID>`, `<REGION>`, and `CORS_ORIGIN` (your Vercel domain from Part 1) placeholders.
-2. Register it: `aws ecs register-task-definition --cli-input-json file://infra/ecs/task-definition.json`
-3. Create the service, in the VPC/subnets your RDS and ElastiCache instances are in, attached to the ALB target group:
+1. In the same Railway project: **New → Database → Add PostgreSQL**, and separately **New → Database → Add Redis**.
+2. On the API service: **Variables** tab → reference the database services directly rather than copy-pasting connection strings:
    ```
-   aws ecs create-service \
-     --cluster ledgerlens \
-     --service-name ledgerlens-api \
-     --task-definition ledgerlens-api \
-     --desired-count 1 \
-     --launch-type FARGATE \
-     --network-configuration "awsvpcConfiguration={subnets=[<subnet-ids>],securityGroups=[<sg-id>],assignPublicIp=ENABLED}" \
-     --load-balancers "targetGroupArn=<target-group-arn>,containerName=api,containerPort=3001"
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   REDIS_URL=${{Redis.REDIS_URL}}
    ```
+   Railway resolves these automatically and keeps them in sync if a database ever gets redeployed — a pasted-in connection string wouldn't.
 
-### 2.7 — Run migrations once, manually, for the first deploy
+### 2.3 — The rest of the API service's env vars
 
-```
-DATABASE_URL='<your RDS DATABASE_URL>' npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
-```
+Still on the API service's **Variables** tab:
 
-(After this, `.github/workflows/deploy-api.yml` runs this same command automatically on every deploy.)
+| Variable | Value |
+|---|---|
+| `ALCHEMY_API_KEY` | from [dashboard.alchemy.com](https://dashboard.alchemy.com) |
+| `LLM_PROVIDER` | `openai` |
+| `OPENAI_API_KEY` | from [platform.openai.com](https://platform.openai.com) — a separate account/billing from a ChatGPT subscription, see S14/S15 |
+| `API_AUTH_SECRET` | must match Vercel's `API_AUTH_SECRET` exactly — `openssl rand -base64 32` |
+| `CORS_ORIGIN` | your Vercel production URL from Part 1, e.g. `https://ledgerlens.vercel.app` |
+| `PORT` | `3001` (Railway sets its own `PORT` by default for some builders, but since this is a Dockerfile build, the container's own `EXPOSE 3001`/`app.listen` wins — set this explicitly so Railway's health check hits the right port) |
+| `SENTRY_DSN` | from Sentry (Part 3), optional |
 
-### 2.8 — Wire up continuous deployment
+**Settings → Networking → Health Check Path**: `/health` (see `apps/api/src/health/health.controller.ts` — deliberately touches no dependency, so a momentary Postgres/Redis blip doesn't make Railway kill a healthy container).
 
-In the GitHub repo's **Settings → Secrets and variables → Actions**, add:
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — an IAM user scoped to ECR push + ECS deploy + the specific Secrets Manager entries.
-- `PROD_DATABASE_URL` — same value as 2.1's `DATABASE_URL`, for the migration step.
+### 2.4 — Deploy, then run migrations once
 
-Then run `.github/workflows/deploy-api.yml` manually once (**Actions** tab → **Deploy API to ECS** → **Run workflow**) to confirm the whole pipeline works end to end. Once you're confident, edit the workflow's `on:` trigger to deploy automatically on push to `main` (the comment at the top of the file shows exactly what to change).
+1. Trigger the first deploy (Railway does this automatically once the service and its env vars are set).
+2. Migrations aren't run on container boot (see the Dockerfile's comment on why — avoids multiple instances racing to migrate). Run them once, from your machine, against Railway's Postgres:
+   ```
+   npm install -g @railway/cli   # if you don't have it
+   railway login
+   railway link                  # pick this project
+   railway run npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+   ```
+   `railway run` executes the command locally with the linked project's env vars injected — including `DATABASE_URL` — so this reaches Railway's Postgres without you ever handling the raw connection string.
+3. Future migrations: same command, any time you add one, before or right after pushing the schema change (Railway redeploys on every push to the connected branch automatically — there's no separate CD workflow to wire up here, unlike the AWS path).
 
 ---
 
@@ -152,26 +96,30 @@ Then run `.github/workflows/deploy-api.yml` manually once (**Actions** tab → *
 
 1. Create a project in Sentry — one for the Next.js app (platform: Next.js), one for the API (platform: Node.js/NestJS). Two DSNs.
 2. Web: set `NEXT_PUBLIC_SENTRY_DSN` in Vercel (Part 1, step 3). For source map upload, also set `SENTRY_AUTH_TOKEN` (Sentry → **Settings → Auth Tokens**), `SENTRY_ORG`, `SENTRY_PROJECT`. Without the auth token, error reporting still works — you just get minified stack traces instead of your actual source lines.
-3. API: add `SENTRY_DSN` to Secrets Manager (2.3) with the API project's DSN, and it flows into the task definition automatically.
+3. API: add `SENTRY_DSN` as a Railway variable (2.3).
 
 ---
 
 ## Part 4 — Close the loop
 
-Two values only become known after Part 2 finishes, and need to be set retroactively:
-
-1. **Vercel**: update `API_URL` to the ALB's public URL (or a custom domain pointed at it), redeploy.
-2. **`infra/ecs/task-definition.json`**: confirm `CORS_ORIGIN` matches your actual Vercel domain exactly (scheme + host, e.g. `https://ledgerlens.vercel.app`), re-register the task definition if you changed it after 2.6.
+1. **Vercel**: update `API_URL` to the Railway domain from 2.1 step 4, redeploy.
+2. **Railway**: confirm `CORS_ORIGIN` matches your actual Vercel domain exactly (scheme + host).
 
 ## Verification checklist
 
 - [ ] `https://<vercel-domain>/login` loads and "Continue with Google" completes a real sign-in.
 - [ ] Adding a wallet, syncing, and viewing transactions all work against the real API.
-- [ ] Generating an insight succeeds (confirms `OPENAI_API_KEY` and `LLM_PROVIDER=openai` are correctly set in Secrets Manager).
-- [ ] `https://<api-domain>/health` returns `{"status":"ok"}`.
+- [ ] Generating an insight succeeds (confirms `OPENAI_API_KEY` and `LLM_PROVIDER=openai` are correctly set in Railway).
+- [ ] `https://<railway-domain>/health` returns `{"status":"ok"}`.
 - [ ] Throwing a deliberate error surfaces in both Sentry projects.
-- [ ] `git commit`/push to `main` after flipping `deploy-api.yml`'s trigger actually redeploys the API.
+- [ ] Pushing a change to `apps/api` actually redeploys on Railway automatically.
 
 ## Last step (per S18): publish the URLs
 
 Once verified, put the live web URL in the README (S19 owns writing the README itself — add a "Live" line near the top once that exists) and in the GitHub repo's **About → Website** field.
+
+---
+
+## Appendix — AWS ECS (not currently used)
+
+`apps/api/Dockerfile` builds the exact same image either way. `infra/ecs/task-definition.json` and `.github/workflows/deploy-api.yml` (manual `workflow_dispatch` trigger, so it's inert unless run deliberately) are a complete, ready-to-use alternative if this project ever needs to move onto AWS — for a job application specifically wanting AWS/ECS experience, or if this genuinely outgrows Railway's scale. Steps: install/configure the AWS CLI, provision RDS Postgres and ElastiCache Redis, store secrets in Secrets Manager, create an ECR repo and push the image, create two IAM roles (execution + task), stand up an ECS cluster/ALB/target group (health check path `/health`, port 3001), register `infra/ecs/task-definition.json`, run the first migration by hand, then add `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`PROD_DATABASE_URL` as GitHub repo secrets and run `deploy-api.yml` once manually before flipping it to deploy automatically on push.

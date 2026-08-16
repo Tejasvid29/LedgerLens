@@ -1,16 +1,17 @@
 name: Deploy API to ECS
 
-# Manual only, deliberately — this workflow will fail until the AWS side
-# (ECR repo, ECS cluster/service, IAM roles, RDS, ElastiCache — see
-# docs/deploy.md) actually exists and AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY
-# are set as repo secrets. Once that's done, flip `on:` to
-# `push: { branches: [main], paths: ['apps/api/**', 'packages/shared/**'] }`
-# for real continuous deployment.
+# AWS ECS is the alternative deploy path documented in docs/deploy.md's
+# appendix — the API is actually deployed on Railway, which redeploys
+# from GitHub automatically on its own and needs no workflow here. This
+# stays inert (workflow_dispatch only) unless you deliberately move to
+# ECS: it'll fail until the AWS side (ECR repo, ECS cluster/service, IAM
+# roles, RDS, ElastiCache) actually exists and
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are set as repo secrets.
 on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1 # update to match the region used in docs/deploy.md
+  AWS_REGION: us-west-2
   ECR_REPOSITORY: ledgerlens-api
   ECS_CLUSTER: ledgerlens
   ECS_SERVICE: ledgerlens-api
