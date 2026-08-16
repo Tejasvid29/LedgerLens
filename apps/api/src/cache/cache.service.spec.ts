@@ -386,3 +386,67 @@ describe('CacheService — metrics', () => {
     expect(cache.getMetrics().hitRate).toBe(1);
   });
 });
+
+describe('CacheService — per-layer latency', () => {
+  let redis: FakeRedis;
+  let cache: CacheService;
+
+  beforeEach(() => {
+    redis = new FakeRedis();
+    cache = makeService(redis);
+  });
+
+  it('starts with empty latency for both layers', () => {
+    expect(cache.getLatency()).toEqual({
+      cache: { count: 0, avgMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0 },
+      origin: { count: 0, avgMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0 },
+    });
+  });
+
+  it('records a cache-layer sample per lookup, set, and del', async () => {
+    await cache.lookup('k', POLICY);
+    await cache.set('k', 'v', POLICY);
+    await cache.del('k');
+
+    expect(cache.getLatency().cache.count).toBe(3);
+  });
+
+  it('records an origin-layer sample only when the loader actually runs', async () => {
+    await cache.swr('k', POLICY, async () => 'v'); // miss → loader runs
+
+    expect(cache.getLatency().origin.count).toBe(1);
+
+    await cache.swr('k', POLICY, async () => 'v'); // now fresh → loader skipped
+
+    expect(cache.getLatency().origin.count).toBe(1);
+  });
+
+  it('records origin latency for a background revalidation, not just the initial miss', async () => {
+    await cache.set('k', 'stale-value', POLICY);
+    redis.age('k', POLICY.ttlSeconds + 5);
+
+    await cache.swr('k', POLICY, async () => 'fresh-value');
+    await flush();
+
+    expect(cache.getLatency().origin.count).toBe(1);
+  });
+
+  it('does not count a short-circuited Redis call as cache latency', async () => {
+    redis.failing = true;
+    await cache.lookup('k', POLICY);
+    await cache.lookup('k', POLICY);
+    await cache.lookup('k', POLICY); // trips the breaker
+
+    const countAtTrip = cache.getLatency().cache.count;
+    await cache.lookup('k', POLICY); // short-circuited — no real Redis call
+
+    expect(cache.getLatency().cache.count).toBe(countAtTrip);
+  });
+
+  it('reset clears latency alongside the counters', async () => {
+    await cache.lookup('k', POLICY);
+    cache.resetMetrics();
+
+    expect(cache.getLatency().cache.count).toBe(0);
+  });
+});

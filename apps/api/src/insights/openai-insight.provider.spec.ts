@@ -1,0 +1,87 @@
+import { InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { OpenAIInsightProvider } from './openai-insight.provider';
+import { InsightRequest } from './insight-provider.interface';
+
+function makeRequest(): InsightRequest {
+  return { walletLabel: 'Main', address: '0xabc', holdings: [], recentTransactions: [] };
+}
+
+describe('OpenAIInsightProvider', () => {
+  let config: { get: jest.Mock };
+  let provider: OpenAIInsightProvider;
+  let fetchMock: jest.Mock;
+
+  beforeEach(() => {
+    config = { get: jest.fn().mockReturnValue('sk-real-key') };
+    provider = new OpenAIInsightProvider(config as unknown as ConfigService);
+    fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('rejects with a clear message when OPENAI_API_KEY is unset, before making any request', async () => {
+    config.get.mockReturnValue(undefined);
+
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(InternalServerErrorException);
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(/OPENAI_API_KEY/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when OPENAI_API_KEY is still the literal .env placeholder', async () => {
+    config.get.mockReturnValue('your-openai-api-key');
+
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(/placeholder/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the Authorization header and a deterministic (temperature 0) request', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'Summary text.' } }] }),
+    });
+
+    await provider.generateInsight(makeRequest());
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    expect(init.headers.Authorization).toBe('Bearer sk-real-key');
+    const body = JSON.parse(init.body);
+    expect(body.temperature).toBe(0);
+    expect(body.messages).toHaveLength(2);
+  });
+
+  it('returns the trimmed summary, model, and a generatedAt timestamp on success', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '  Summary text.  ' } }] }),
+    });
+
+    const result = await provider.generateInsight(makeRequest());
+
+    expect(result.summary).toBe('Summary text.');
+    expect(result.model).toBe('gpt-4o-mini');
+    expect(() => new Date(result.generatedAt).toISOString()).not.toThrow();
+  });
+
+  it('throws with the HTTP status and body when OpenAI returns a non-ok response', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 429, text: async () => 'rate limited' });
+
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(/HTTP 429/);
+  });
+
+  it('throws when the response has no summary content', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ choices: [] }) });
+
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(/did not include a summary/);
+  });
+
+  it('wraps a network-level failure rather than letting it escape as a raw fetch error', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+
+    await expect(provider.generateInsight(makeRequest())).rejects.toThrow(/Could not reach OpenAI/);
+  });
+});
