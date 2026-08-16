@@ -22,6 +22,7 @@
     "@nestjs/config": "^3.3.0",
     "@ledgerlens/shared": "*",
     "@prisma/client": "^6.3.1",
+    "@sentry/node": "^8.42.0",
     "alchemy-sdk": "^3.5.1",
     "ioredis": "^5.4.2",
     "reflect-metadata": "^0.2.2",
