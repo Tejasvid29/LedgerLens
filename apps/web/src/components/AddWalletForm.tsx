@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isValidAddress } from '@ledgerlens/shared';
-import { createWallet } from '@/lib/api';
+import { createWalletAction } from '@/lib/actions';
 
 /**
  * Client island: the rest of the sidebar is a Server Component, but adding a
@@ -34,7 +34,7 @@ export function AddWalletForm() {
 
     setLoading(true);
     try {
-      const wallet = await createWallet(address, label || undefined);
+      const wallet = await createWalletAction(address, label || undefined);
       setAddress('');
       setLabel('');
       router.push(`/?wallet=${wallet.id}`);

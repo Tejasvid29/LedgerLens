@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { syncWallet } from '@/lib/api';
+import { syncWalletAction } from '@/lib/actions';
 
 interface Props {
   walletId: string;
@@ -29,7 +29,7 @@ export function SyncControls({ walletId }: Props) {
     setSyncing(true);
     setError(null);
     try {
-      await syncWallet(walletId);
+      await syncWalletAction(walletId);
       router.refresh();
     } catch {
       setError('Sync failed. Check your Alchemy API key and try again.');

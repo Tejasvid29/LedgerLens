@@ -8,11 +8,14 @@ import {
   NotFoundException,
   Query,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
 import { SyncService } from '../chain/sync.service';
 import { CHAINS } from '../chain/chain.config';
 import { queryTransactions, SortDirection, TransactionSortField } from './transactions-query';
+import { ServiceAuthGuard } from '../auth/service-auth.guard';
+import { CurrentUser, AuthedUser } from '../auth/current-user.decorator';
 
 @Controller('wallets')
 export class WalletsController {
@@ -21,6 +24,7 @@ export class WalletsController {
     private readonly syncService: SyncService,
   ) {}
 
+  // Static reference data, not user data — left outside the auth guard.
   @Get('chains/supported')
   supportedChains() {
     return Object.entries(CHAINS).map(([key, chain]) => ({
@@ -32,31 +36,37 @@ export class WalletsController {
   }
 
   @Get()
-  list() {
-    return this.wallets.list();
+  @UseGuards(ServiceAuthGuard)
+  list(@CurrentUser() user: AuthedUser) {
+    return this.wallets.list(user.id);
   }
 
   @Post()
-  create(@Body() body: { address: string; label?: string }) {
-    return this.wallets.create(body.address, body.label);
+  @UseGuards(ServiceAuthGuard)
+  create(@CurrentUser() user: AuthedUser, @Body() body: { address: string; label?: string }) {
+    return this.wallets.create(user.id, body.address, body.label);
   }
 
   @Get(':id')
-  async get(@Param('id') id: string) {
-    const wallet = await this.wallets.findById(id);
+  @UseGuards(ServiceAuthGuard)
+  async get(@CurrentUser() user: AuthedUser, @Param('id') id: string) {
+    const wallet = await this.wallets.findById(id, user.id);
     if (!wallet) throw new NotFoundException('Wallet not found');
     return wallet;
   }
 
   @Get(':id/holdings')
-  async holdings(@Param('id') id: string) {
-    const wallet = await this.wallets.findById(id);
+  @UseGuards(ServiceAuthGuard)
+  async holdings(@CurrentUser() user: AuthedUser, @Param('id') id: string) {
+    const wallet = await this.wallets.findById(id, user.id);
     if (!wallet) throw new NotFoundException('Wallet not found');
     return this.wallets.getHoldings(id);
   }
 
   @Get(':id/transactions')
+  @UseGuards(ServiceAuthGuard)
   async transactions(
+    @CurrentUser() user: AuthedUser,
     @Param('id') id: string,
     @Query('refresh') refresh?: string,
     @Query('baseline') baseline?: string,
@@ -68,7 +78,7 @@ export class WalletsController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
-    const wallet = await this.wallets.findById(id);
+    const wallet = await this.wallets.findById(id, user.id);
     if (!wallet) throw new NotFoundException('Wallet not found');
 
     const skipCache = nocache === 'true' || baseline === 'true';
@@ -101,11 +111,13 @@ export class WalletsController {
   }
 
   @Post(':id/sync')
+  @UseGuards(ServiceAuthGuard)
   async sync(
+    @CurrentUser() user: AuthedUser,
     @Param('id') id: string,
     @Body() body?: { chains?: string[] },
   ) {
-    const wallet = await this.wallets.findById(id);
+    const wallet = await this.wallets.findById(id, user.id);
     if (!wallet) throw new NotFoundException('Wallet not found');
     const result = await this.syncService.syncWallet(id, body?.chains);
     await this.wallets.invalidateCache(id);
@@ -113,11 +125,13 @@ export class WalletsController {
   }
 
   @Delete(':id')
+  @UseGuards(ServiceAuthGuard)
   @HttpCode(204)
-  async remove(@Param('id') id: string) {
+  async remove(@CurrentUser() user: AuthedUser, @Param('id') id: string) {
     // wallets.remove() throws NotFoundException itself if the id doesn't
-    // exist, so no separate existence check is needed here.
-    await this.wallets.remove(id);
+    // exist or isn't this user's, so no separate existence check is needed
+    // here.
+    await this.wallets.remove(id, user.id);
   }
 }
 

@@ -1,6 +1,11 @@
 import type { SerializedTransaction, SerializedHolding, WalletSummary } from '@ledgerlens/shared';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+// Server-only since S12 — no NEXT_PUBLIC_ prefix. The browser never calls
+// apps/api directly anymore: every call here needs a signed service token
+// (see lib/serviceAuth.ts) that only this server can mint, so every caller
+// of this module is necessarily server-side (a Server Component or a
+// Server Action) already.
+const API_URL = process.env.API_URL ?? 'http://localhost:3001';
 
 export type { SerializedTransaction, SerializedHolding, WalletSummary };
 export type Transaction = SerializedTransaction;
@@ -49,8 +54,12 @@ export interface TransactionsResponse {
   };
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', ...init });
+async function apiFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: 'no-store',
+    ...init,
+    headers: { ...init?.headers, Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) {
     // NestJS's default exception body is { statusCode, message, error } —
     // message is what a BadRequestException/NotFoundException actually
@@ -70,11 +79,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export async function fetchWallets(): Promise<WalletSummary[]> {
-  return apiFetch<WalletSummary[]>('/wallets');
+export async function fetchWallets(token: string): Promise<WalletSummary[]> {
+  return apiFetch<WalletSummary[]>('/wallets', token);
 }
 
 export async function fetchTransactions(
+  token: string,
   walletId: string,
   query: TransactionsQuery = {},
 ): Promise<TransactionsResponse> {
@@ -87,29 +97,29 @@ export async function fetchTransactions(
   if (query.pageSize) params.set('pageSize', String(query.pageSize));
 
   const qs = params.toString();
-  return apiFetch<TransactionsResponse>(`/wallets/${walletId}/transactions${qs ? `?${qs}` : ''}`);
+  return apiFetch<TransactionsResponse>(`/wallets/${walletId}/transactions${qs ? `?${qs}` : ''}`, token);
 }
 
-export async function fetchHoldings(walletId: string): Promise<HoldingsResponse> {
-  return apiFetch<HoldingsResponse>(`/wallets/${walletId}/holdings`);
+export async function fetchHoldings(token: string, walletId: string): Promise<HoldingsResponse> {
+  return apiFetch<HoldingsResponse>(`/wallets/${walletId}/holdings`, token);
 }
 
-export async function createWallet(address: string, label?: string): Promise<WalletSummary> {
-  return apiFetch<WalletSummary>('/wallets', {
+export async function createWallet(token: string, address: string, label?: string): Promise<WalletSummary> {
+  return apiFetch<WalletSummary>('/wallets', token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, label }),
   });
 }
 
-export async function syncWallet(walletId: string): Promise<void> {
-  await apiFetch(`/wallets/${walletId}/sync`, {
+export async function syncWallet(token: string, walletId: string): Promise<void> {
+  await apiFetch(`/wallets/${walletId}/sync`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
 }
 
-export async function deleteWallet(walletId: string): Promise<void> {
-  await apiFetch(`/wallets/${walletId}`, { method: 'DELETE' });
+export async function deleteWallet(token: string, walletId: string): Promise<void> {
+  await apiFetch(`/wallets/${walletId}`, token, { method: 'DELETE' });
 }

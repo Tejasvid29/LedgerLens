@@ -1,9 +1,12 @@
+import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { HoldingsSummary } from '@/components/HoldingsSummary';
 import { TransactionTable } from '@/components/TransactionTable';
 import { TransactionFilters } from '@/components/TransactionFilters';
 import { TransactionPagination } from '@/components/TransactionPagination';
 import { SyncControls } from '@/components/SyncControls';
+import { SignOutButton } from '@/components/SignOutButton';
+import { getAuthedSession } from '@/lib/serviceAuth';
 import {
   fetchWallets,
   fetchHoldings,
@@ -38,11 +41,14 @@ interface PageProps {
  * calling out from the browser. loading.tsx covers the in-between.
  */
 export default async function Home({ searchParams }: PageProps) {
+  const session = await getAuthedSession();
+  if (!session) redirect('/login');
+
   let wallets: WalletSummary[] = [];
   let apiError: string | null = null;
 
   try {
-    wallets = await fetchWallets();
+    wallets = await fetchWallets(session.token);
   } catch {
     apiError = 'Could not reach the API. Is the backend running on port 3001?';
   }
@@ -65,8 +71,8 @@ export default async function Home({ searchParams }: PageProps) {
   if (selected && !apiError) {
     try {
       const [holdingsRes, txRes] = await Promise.all([
-        fetchHoldings(selected.id),
-        fetchTransactions(selected.id, {
+        fetchHoldings(session.token, selected.id),
+        fetchTransactions(session.token, selected.id, {
           chain: searchParams.chain,
           token: searchParams.token,
           sort: searchParams.sort as TransactionSortField | undefined,
@@ -96,9 +102,15 @@ export default async function Home({ searchParams }: PageProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
-      <header className="mb-10 border-b border-rule pb-6">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Ledgerlens</h1>
-        <p className="mt-1 text-ink/60">Multi-chain portfolio, one ledger.</p>
+      <header className="mb-10 flex items-start justify-between border-b border-rule pb-6">
+        <div>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">Ledgerlens</h1>
+          <p className="mt-1 text-ink/60">Multi-chain portfolio, one ledger.</p>
+        </div>
+        <div className="flex items-center gap-3 pt-1 text-xs text-ink/50">
+          <span>{session.email}</span>
+          <SignOutButton />
+        </div>
       </header>
 
       {apiError && (

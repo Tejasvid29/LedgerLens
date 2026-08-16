@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { deleteWallet } from '@/lib/api';
+import { deleteWalletAction } from '@/lib/actions';
 
 interface Props {
   walletId: string;
@@ -32,7 +32,7 @@ export function RemoveWalletButton({ walletId, isSelected }: Props) {
     setRemoving(true);
     setError(null);
     try {
-      await deleteWallet(walletId);
+      await deleteWalletAction(walletId);
       if (isSelected) {
         router.push('/');
       }

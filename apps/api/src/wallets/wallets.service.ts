@@ -29,14 +29,15 @@ export class WalletsService {
     await this.cache.del(...walletDerivedKeys(walletId));
   }
 
-  async list() {
+  async list(userId: string) {
     return this.prisma.wallet.findMany({
+      where: { userId },
       orderBy: { id: 'desc' },
       include: { _count: { select: { transactions: true } } },
     });
   }
 
-  async create(address: string, label?: string) {
+  async create(userId: string, address: string, label?: string) {
     // Validate before lowercasing/storage — same 0x+40-hex format across all
     // 6 supported chains, so one check covers every chain, not just
     // Ethereum. The client validates too, but this must not trust that: a
@@ -47,16 +48,12 @@ export class WalletsService {
 
     const normalized = address.toLowerCase();
 
-    let user = await this.prisma.user.findFirst();
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: { email: 'demo@ledgerlens.app' },
-      });
-    }
-
+    // userId comes from ServiceAuthGuard, which has already resolved (and
+    // if needed, created) the User row for this session — no more
+    // find-or-create-a-demo-user fallback here.
     return this.prisma.wallet.upsert({
-      where: { userId_address: { userId: user.id, address: normalized } },
-      create: { address: normalized, label, userId: user.id },
+      where: { userId_address: { userId, address: normalized } },
+      create: { address: normalized, label, userId },
       update: { label: label ?? undefined },
     });
   }
@@ -67,10 +64,17 @@ export class WalletsService {
    * schema.prisma), so they're deleted first, in one transaction, to avoid
    * an FK violation and to avoid ever leaving orphaned rows if this fails
    * partway through.
+   *
+   * Unlike the other wallet-scoped methods, this one has no earlier
+   * findById(id, userId) call in the controller to lean on for the
+   * ownership check — it does its own.
    */
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
     const wallet = await this.prisma.wallet.findUnique({ where: { id } });
-    if (!wallet) throw new NotFoundException('Wallet not found');
+    // Same NotFoundException whether the wallet doesn't exist or belongs to
+    // someone else — distinguishing the two would confirm to a caller that
+    // a given wallet id exists at all, just not theirs.
+    if (!wallet || wallet.userId !== userId) throw new NotFoundException('Wallet not found');
 
     await this.prisma.$transaction([
       this.prisma.transaction.deleteMany({ where: { walletId: id } }),
@@ -81,9 +85,15 @@ export class WalletsService {
     await this.invalidateCache(id);
   }
 
-  async findById(id: string) {
-    return this.prisma.wallet.findUnique({
-      where: { id },
+  /**
+   * The sole ownership gate: every controller route that operates on an
+   * existing wallet id calls this first and 404s if it comes back null,
+   * then trusts `id` for the rest of that request — see getHoldings/
+   * getTransactions below, which don't re-check userId themselves.
+   */
+  async findById(id: string, userId: string) {
+    return this.prisma.wallet.findFirst({
+      where: { id, userId },
       include: { _count: { select: { transactions: true, holdings: true } } },
     });
   }
