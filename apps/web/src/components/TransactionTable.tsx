@@ -1,21 +1,27 @@
-import type { Transaction } from '@/lib/api';
+import type { SerializedTransaction } from '@/lib/api';
+import { LedgerAmount } from './LedgerAmount';
 
 interface Props {
-  transactions: Transaction[];
+  transactions: SerializedTransaction[];
 }
 
-function directionColor(direction: Transaction['direction']) {
+// Direction is the only place gain/loss color applies here — it's the one
+// figure with real gain/loss meaning (funds arriving vs. leaving this
+// wallet). Chain, token, and date are identity, not performance; they stay
+// ink.
+function directionColor(direction: SerializedTransaction['direction']) {
   if (direction === 'IN') return 'text-ledgerGreen';
   if (direction === 'OUT') return 'text-oxblood';
   return 'text-ink/50';
 }
 
-function directionPrefix(direction: Transaction['direction']) {
+function directionPrefix(direction: SerializedTransaction['direction']) {
   if (direction === 'IN') return '+';
   if (direction === 'OUT') return '−';
   return '';
 }
 
+/** No client interactivity — a pure render of server-fetched data. */
 export function TransactionTable({ transactions }: Props) {
   if (transactions.length === 0) {
     return (
@@ -50,10 +56,10 @@ export function TransactionTable({ transactions }: Props) {
           </span>
           <span className="text-ink/70">{tx.chainName}</span>
           <span className="font-mono text-ink/80">{tx.tokenSymbol}</span>
-          <span className={`font-mono tabular-amount text-right ${directionColor(tx.direction)}`}>
-            {directionPrefix(tx.direction)}{tx.displayAmount}
+          <span className={directionColor(tx.direction)}>
+            <LedgerAmount value={tx.displayAmount} prefix={directionPrefix(tx.direction)} />
           </span>
-          <span className={`text-right text-xs uppercase ${directionColor(tx.direction)}`}>
+          <span className={`self-center text-right text-xs uppercase ${directionColor(tx.direction)}`}>
             {tx.direction}
           </span>
         </div>

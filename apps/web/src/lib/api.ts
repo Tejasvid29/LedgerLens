@@ -1,60 +1,61 @@
+import type { SerializedTransaction, SerializedHolding, WalletSummary } from '@ledgerlens/shared';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export interface Transaction {
-  id: string;
+export type { SerializedTransaction, SerializedHolding, WalletSummary };
+export type Transaction = SerializedTransaction;
+export type Wallet = WalletSummary;
+
+/**
+ * Mirrors apps/api/src/wallets/holdings.ts's HoldingIssue. Not imported from
+ * there — that module belongs to the API, not the shared package, and this
+ * app should only depend on the JSON shape it actually receives over the
+ * wire, not reach into another workspace's internals.
+ */
+export interface HoldingIssue {
   chainId: number;
-  chainName: string;
-  hash: string;
-  blockNumber: string;
-  timestamp: string;
-  direction: 'IN' | 'OUT' | 'SELF';
-  rawValue: string;
-  decimals: number;
-  displayAmount: string;
-  tokenSymbol: string;
   tokenAddress: string | null;
-  status: string;
+  reason: string;
+  detail?: string;
 }
 
-export interface Wallet {
-  id: string;
-  address: string;
-  label: string | null;
-  lastSyncedAt: string | null;
-  _count?: { transactions: number };
+export interface HoldingsResponse {
+  holdings: SerializedHolding[];
+  issues: HoldingIssue[];
 }
 
-export async function fetchWallets(): Promise<Wallet[]> {
-  const res = await fetch(`${API_URL}/wallets`, { next: { revalidate: 0 } });
-  if (!res.ok) throw new Error('Failed to fetch wallets');
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', ...init });
+  if (!res.ok) {
+    throw new Error(`${init?.method ?? 'GET'} ${path} failed: HTTP ${res.status}`);
+  }
   return res.json();
 }
 
-export async function fetchTransactions(
-  walletId: string,
-  refresh = false,
-): Promise<Transaction[]> {
-  const url = `${API_URL}/wallets/${walletId}/transactions${refresh ? '?refresh=true' : ''}`;
-  const res = await fetch(url, { next: { revalidate: 0 } });
-  if (!res.ok) throw new Error('Failed to fetch transactions');
-  return res.json();
+export async function fetchWallets(): Promise<WalletSummary[]> {
+  return apiFetch<WalletSummary[]>('/wallets');
 }
 
-export async function createWallet(address: string, label?: string): Promise<Wallet> {
-  const res = await fetch(`${API_URL}/wallets`, {
+export async function fetchTransactions(walletId: string): Promise<SerializedTransaction[]> {
+  return apiFetch<SerializedTransaction[]>(`/wallets/${walletId}/transactions`);
+}
+
+export async function fetchHoldings(walletId: string): Promise<HoldingsResponse> {
+  return apiFetch<HoldingsResponse>(`/wallets/${walletId}/holdings`);
+}
+
+export async function createWallet(address: string, label?: string): Promise<WalletSummary> {
+  return apiFetch<WalletSummary>('/wallets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, label }),
   });
-  if (!res.ok) throw new Error('Failed to create wallet');
-  return res.json();
 }
 
 export async function syncWallet(walletId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/wallets/${walletId}/sync`, {
+  await apiFetch(`/wallets/${walletId}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
-  if (!res.ok) throw new Error('Failed to sync wallet');
 }

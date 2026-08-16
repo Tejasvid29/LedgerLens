@@ -1,13 +1,20 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createWallet } from '@/lib/api';
 
-interface Props {
-  onAdded: () => void;
-}
-
-export function AddWalletForm({ onAdded }: Props) {
+/**
+ * Client island: the rest of the sidebar is a Server Component, but adding a
+ * wallet needs form state and an error message, which Server Components
+ * can't hold.
+ *
+ * On success, navigates to ?wallet=<newId> rather than calling a refetch
+ * callback — that both selects the new wallet and re-runs the page's server
+ * data fetch in one round-trip, instead of duplicating fetch logic here.
+ */
+export function AddWalletForm() {
+  const router = useRouter();
   const [address, setAddress] = useState('');
   const [label, setLabel] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -16,16 +23,20 @@ export function AddWalletForm({ onAdded }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      // Same format across all 6 supported chains — this isn't Ethereum-only.
+      setError('Enter a valid wallet address (0x…, 42 characters).');
+      return;
+    }
+
+    setLoading(true);
     try {
-      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-        throw new Error('Enter a valid Ethereum address (0x…, 42 characters).');
-      }
-      await createWallet(address, label || undefined);
+      const wallet = await createWallet(address, label || undefined);
       setAddress('');
       setLabel('');
-      onAdded();
+      router.push(`/?wallet=${wallet.id}`);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -69,9 +80,7 @@ export function AddWalletForm({ onAdded }: Props) {
         </div>
       </div>
 
-      {error && (
-        <p className="mt-3 text-sm text-oxblood">{error}</p>
-      )}
+      {error && <p className="mt-3 text-sm text-oxblood">{error}</p>}
 
       <button
         type="submit"
