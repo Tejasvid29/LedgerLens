@@ -4,8 +4,13 @@ import { INSIGHT_PROVIDER, InsightProvider, InsightResult } from './insight-prov
 
 /** Bounding this keeps the prompt (and the token spend) predictable
  *  regardless of how much history a wallet has accumulated — an insight
- *  is meant to summarize recent activity, not the entire ledger. */
-const RECENT_TRANSACTIONS_LIMIT = 20;
+ *  is meant to summarize recent activity, not the entire ledger.
+ *
+ *  Exported so the eval fixtures (evals/fixtures.ts) cap their inputs the
+ *  same way production does — a "200+ transactions" eval case must grade
+ *  what the provider actually receives, not a wallet-sized list the
+ *  provider would never see. Changing this here changes the evals too. */
+export const RECENT_TRANSACTIONS_LIMIT = 20;
 
 @Injectable()
 export class InsightsService {

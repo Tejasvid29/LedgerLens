@@ -8,6 +8,7 @@
     "start": "node dist/main",
     "test": "jest",
     "test:watch": "jest --watch",
+    "evals": "ts-node -P tsconfig.json src/insights/evals/run-evals.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:push": "prisma db push"
