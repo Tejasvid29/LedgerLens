@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { formatAmount, SerializedTransaction } from '@ledgerlens/shared';
+import { formatAmount, SerializedHolding, SerializedTransaction } from '@ledgerlens/shared';
 import { getChainConfig } from '../chain/chain.config';
+import { AggregatedHolding, aggregateHoldings, HoldingIssue } from './holdings';
 
 const CACHE_TTL = 300;
 
@@ -76,6 +77,52 @@ export class WalletsService {
     }
 
     return serialized;
+  }
+
+  /**
+   * Current per-token, per-chain balances, computed from stored transactions
+   * (not a cached snapshot — see holdings.ts for why this reads straight
+   * from the ledger every time rather than a materialized Holding row).
+   */
+  async getHoldings(
+    walletId: string,
+  ): Promise<{ holdings: SerializedHolding[]; issues: HoldingIssue[] }> {
+    const txs = await this.prisma.transaction.findMany({
+      where: { walletId },
+      select: {
+        chainId: true,
+        tokenAddress: true,
+        tokenSymbol: true,
+        rawValue: true,
+        decimals: true,
+        direction: true,
+        status: true,
+        timestamp: true,
+      },
+    });
+
+    const { holdings, issues } = aggregateHoldings(
+      txs.map((tx) => ({
+        ...tx,
+        direction: tx.direction as SerializedTransaction['direction'],
+        status: tx.status as SerializedTransaction['status'],
+      })),
+    );
+
+    return { holdings: holdings.map((h) => this.serializeHolding(h)), issues };
+  }
+
+  private serializeHolding(h: AggregatedHolding): SerializedHolding {
+    const chain = getChainConfig(h.chainId);
+    return {
+      chainId: h.chainId,
+      chainName: chain?.name ?? `Chain ${h.chainId}`,
+      tokenAddress: h.tokenAddress,
+      tokenSymbol: h.tokenSymbol,
+      rawBalance: h.rawBalance,
+      decimals: h.decimals,
+      displayBalance: formatAmount(h.rawBalance, h.decimals),
+    };
   }
 
   private serializeTx(tx: {

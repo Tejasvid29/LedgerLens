@@ -42,4 +42,15 @@ export interface WalletSummary {
   _count?: { transactions: number };
 }
 
+/** JSON-safe current balance for one token on one chain. */
+export interface SerializedHolding {
+  chainId: number;
+  chainName: string;
+  tokenAddress: string | null;
+  tokenSymbol: string;
+  rawBalance: string;
+  decimals: number;
+  displayBalance: string;
+}
+
 export { formatAmount } from './amounts';

@@ -449,4 +449,20 @@ describe('formatAmount', () => {
     expect(formatAmount('1000000000000000000', 18)).toBe('1');
     expect(formatAmount('1100000000000000000', 18)).toBe('1.1');
   });
+
+  // Transaction amounts are never negative (the normalizer rejects those —
+  // see normalizer.spec.ts), but an aggregated holding balance can be when
+  // stored history is missing an inflow. See holdings.ts.
+  it('formats a negative amount with a leading "-"', () => {
+    expect(formatAmount('-1000000', 6)).toBe('-1');
+    expect(formatAmount('-1500000', 6)).toBe('-1.5');
+  });
+
+  it('does not render negative zero', () => {
+    expect(formatAmount('-0', 6)).toBe('0');
+  });
+
+  it('handles a negative zero-decimal amount', () => {
+    expect(formatAmount('-42', 0)).toBe('-42');
+  });
 });

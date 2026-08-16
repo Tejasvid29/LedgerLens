@@ -45,6 +45,13 @@ export class WalletsController {
     return wallet;
   }
 
+  @Get(':id/holdings')
+  async holdings(@Param('id') id: string) {
+    const wallet = await this.wallets.findById(id);
+    if (!wallet) throw new NotFoundException('Wallet not found');
+    return this.wallets.getHoldings(id);
+  }
+
   @Get(':id/transactions')
   async transactions(
     @Param('id') id: string,
