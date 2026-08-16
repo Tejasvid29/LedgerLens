@@ -48,6 +48,12 @@ jobs:
       - name: Build shared package
         run: npm run build -w @ledgerlens/shared
 
+      - name: Lint API
+        run: npm run lint -w @ledgerlens/api
+
+      - name: Lint web
+        run: npm run lint -w @ledgerlens/web
+
       - name: Generate Prisma client
         run: npm run db:generate -w @ledgerlens/api
 
