@@ -62,6 +62,11 @@ async function measureOnce() {
   const start = performance.now();
   const res = await fetch(`${API}/wallets/${walletId}/transactions${queryFor(mode)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  // S11 wrapped the response in a { transactions, total, page, ... }
+  // envelope for filter/sort/pagination. Still just JSON either way — this
+  // script only measures round-trip time, so the shape change doesn't
+  // affect it. No page/pageSize params here, so this is still the same
+  // up-to-500-row response as before S11.
   await res.json();
   return performance.now() - start;
 }

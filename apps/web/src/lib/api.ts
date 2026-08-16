@@ -24,6 +24,31 @@ export interface HoldingsResponse {
   issues: HoldingIssue[];
 }
 
+/** Mirrors apps/api/src/wallets/transactions-query.ts's whitelist — kept as
+ *  a wire-shape mirror for the same reason as HoldingIssue above. */
+export type TransactionSortField = 'timestamp' | 'chainName' | 'tokenSymbol' | 'amount' | 'direction';
+export type SortDirection = 'asc' | 'desc';
+
+export interface TransactionsQuery {
+  chain?: string;
+  token?: string;
+  sort?: TransactionSortField;
+  dir?: SortDirection;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface TransactionsResponse {
+  transactions: SerializedTransaction[];
+  total: number;
+  page: number;
+  pageSize: number;
+  filters: {
+    chains: { chainId: number; chainName: string }[];
+    tokens: string[];
+  };
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', ...init });
   if (!res.ok) {
@@ -49,8 +74,20 @@ export async function fetchWallets(): Promise<WalletSummary[]> {
   return apiFetch<WalletSummary[]>('/wallets');
 }
 
-export async function fetchTransactions(walletId: string): Promise<SerializedTransaction[]> {
-  return apiFetch<SerializedTransaction[]>(`/wallets/${walletId}/transactions`);
+export async function fetchTransactions(
+  walletId: string,
+  query: TransactionsQuery = {},
+): Promise<TransactionsResponse> {
+  const params = new URLSearchParams();
+  if (query.chain) params.set('chain', query.chain);
+  if (query.token) params.set('token', query.token);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.dir) params.set('dir', query.dir);
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('pageSize', String(query.pageSize));
+
+  const qs = params.toString();
+  return apiFetch<TransactionsResponse>(`/wallets/${walletId}/transactions${qs ? `?${qs}` : ''}`);
 }
 
 export async function fetchHoldings(walletId: string): Promise<HoldingsResponse> {

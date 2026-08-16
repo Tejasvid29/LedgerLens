@@ -1,8 +1,11 @@
-import type { SerializedTransaction } from '@/lib/api';
+import Link from 'next/link';
+import type { SerializedTransaction, TransactionSortField } from '@/lib/api';
 import { LedgerAmount } from './LedgerAmount';
+import { buildTransactionsUrl, type TransactionUrlState } from '@/lib/transactionUrl';
 
 interface Props {
   transactions: SerializedTransaction[];
+  current: TransactionUrlState;
 }
 
 // Direction is the only place gain/loss color applies here — it's the one
@@ -21,8 +24,40 @@ function directionPrefix(direction: SerializedTransaction['direction']) {
   return '';
 }
 
-/** No client interactivity — a pure render of server-fetched data. */
-export function TransactionTable({ transactions }: Props) {
+interface HeaderProps {
+  field: TransactionSortField;
+  label: string;
+  current: TransactionUrlState;
+  align?: 'left' | 'right';
+}
+
+/**
+ * A <Link> to the same URL with this field's sort applied — no client JS,
+ * matching the wallet-switch pattern from S9. First click on a new field
+ * sorts descending (matches the default timestamp-desc sort so the
+ * behavior is predictable); clicking the already-active field toggles.
+ */
+function SortableHeader({ field, label, current, align = 'left' }: HeaderProps) {
+  const active = (current.sort ?? 'timestamp') === field;
+  const activeDir = current.dir ?? 'desc';
+  const nextDir = active && activeDir === 'desc' ? 'asc' : 'desc';
+
+  return (
+    <Link
+      href={buildTransactionsUrl(current, { sort: field, dir: nextDir, page: undefined })}
+      className={`flex items-center gap-1 hover:text-ink ${align === 'right' ? 'justify-end' : ''} ${
+        active ? 'text-ink' : ''
+      }`}
+    >
+      {label}
+      {active && <span aria-hidden>{activeDir === 'desc' ? '↓' : '↑'}</span>}
+    </Link>
+  );
+}
+
+/** No client interactivity — a pure render of server-fetched, server-sorted
+ *  data. Sorting/filtering are all navigations, not client state. */
+export function TransactionTable({ transactions, current }: Props) {
   if (transactions.length === 0) {
     return (
       <div className="border border-rule bg-white p-12 text-center">
@@ -35,11 +70,11 @@ export function TransactionTable({ transactions }: Props) {
   return (
     <div className="border border-rule bg-white">
       <div className="grid grid-cols-[1fr_100px_120px_140px_80px] gap-4 border-b border-rule px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink/50">
-        <span>Date</span>
-        <span>Chain</span>
-        <span>Token</span>
-        <span className="text-right">Amount</span>
-        <span className="text-right">Dir</span>
+        <SortableHeader field="timestamp" label="Date" current={current} />
+        <SortableHeader field="chainName" label="Chain" current={current} />
+        <SortableHeader field="tokenSymbol" label="Token" current={current} />
+        <SortableHeader field="amount" label="Amount" current={current} align="right" />
+        <SortableHeader field="direction" label="Dir" current={current} align="right" />
       </div>
 
       {transactions.map((tx) => (

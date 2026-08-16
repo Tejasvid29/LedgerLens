@@ -1,6 +1,8 @@
 import { Sidebar } from '@/components/Sidebar';
 import { HoldingsSummary } from '@/components/HoldingsSummary';
 import { TransactionTable } from '@/components/TransactionTable';
+import { TransactionFilters } from '@/components/TransactionFilters';
+import { TransactionPagination } from '@/components/TransactionPagination';
 import { SyncControls } from '@/components/SyncControls';
 import {
   fetchWallets,
@@ -8,12 +10,24 @@ import {
   fetchTransactions,
   type WalletSummary,
   type SerializedHolding,
-  type SerializedTransaction,
   type HoldingIssue,
+  type TransactionsResponse,
+  type TransactionSortField,
+  type SortDirection,
 } from '@/lib/api';
+import type { TransactionUrlState } from '@/lib/transactionUrl';
+
+const TRANSACTIONS_PAGE_SIZE = 25;
 
 interface PageProps {
-  searchParams: { wallet?: string };
+  searchParams: {
+    wallet?: string;
+    chain?: string;
+    token?: string;
+    sort?: string;
+    dir?: string;
+    page?: string;
+  };
 }
 
 /**
@@ -40,21 +54,45 @@ export default async function Home({ searchParams }: PageProps) {
 
   let holdings: SerializedHolding[] = [];
   let issues: HoldingIssue[] = [];
-  let transactions: SerializedTransaction[] = [];
+  let txResponse: TransactionsResponse = {
+    transactions: [],
+    total: 0,
+    page: 1,
+    pageSize: TRANSACTIONS_PAGE_SIZE,
+    filters: { chains: [], tokens: [] },
+  };
 
   if (selected && !apiError) {
     try {
-      const [holdingsRes, txs] = await Promise.all([
+      const [holdingsRes, txRes] = await Promise.all([
         fetchHoldings(selected.id),
-        fetchTransactions(selected.id),
+        fetchTransactions(selected.id, {
+          chain: searchParams.chain,
+          token: searchParams.token,
+          sort: searchParams.sort as TransactionSortField | undefined,
+          dir: searchParams.dir as SortDirection | undefined,
+          page: searchParams.page ? Number(searchParams.page) : undefined,
+          pageSize: TRANSACTIONS_PAGE_SIZE,
+        }),
       ]);
       holdings = holdingsRes.holdings;
       issues = holdingsRes.issues;
-      transactions = txs;
+      txResponse = txRes;
     } catch {
       apiError = 'Failed to load wallet data.';
     }
   }
+
+  // Single source of "current URL state" passed to the sort headers,
+  // pagination links, and filter selects — see transactionUrl.ts.
+  const currentTxUrl: TransactionUrlState = {
+    wallet: selected?.id,
+    chain: searchParams.chain,
+    token: searchParams.token,
+    sort: searchParams.sort,
+    dir: searchParams.dir,
+    page: searchParams.page,
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
@@ -105,10 +143,23 @@ export default async function Home({ searchParams }: PageProps) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink/50">
-                  Transactions
-                </h3>
-                <TransactionTable transactions={transactions} />
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-ink/50">
+                    Transactions
+                  </h3>
+                  <TransactionFilters
+                    current={currentTxUrl}
+                    chains={txResponse.filters.chains}
+                    tokens={txResponse.filters.tokens}
+                  />
+                </div>
+                <TransactionTable transactions={txResponse.transactions} current={currentTxUrl} />
+                <TransactionPagination
+                  current={currentTxUrl}
+                  page={txResponse.page}
+                  pageSize={txResponse.pageSize}
+                  total={txResponse.total}
+                />
               </section>
             </>
           )}

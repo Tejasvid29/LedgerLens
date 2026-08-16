@@ -12,6 +12,7 @@ import {
 import { WalletsService } from './wallets.service';
 import { SyncService } from '../chain/sync.service';
 import { CHAINS } from '../chain/chain.config';
+import { queryTransactions, SortDirection, TransactionSortField } from './transactions-query';
 
 @Controller('wallets')
 export class WalletsController {
@@ -60,6 +61,12 @@ export class WalletsController {
     @Query('refresh') refresh?: string,
     @Query('baseline') baseline?: string,
     @Query('nocache') nocache?: string,
+    @Query('chain') chain?: string,
+    @Query('token') token?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     const wallet = await this.wallets.findById(id);
     if (!wallet) throw new NotFoundException('Wallet not found');
@@ -72,7 +79,25 @@ export class WalletsController {
       await this.wallets.invalidateCache(id);
     }
 
-    return this.wallets.getTransactions(id, { skipCache });
+    // Cache holds one canonical per-wallet list (see WalletsService); filter/
+    // sort/pagination apply after, in memory, so this doesn't multiply cache
+    // keys per query-param combination. Omitting chain/token/page/pageSize
+    // reproduces the pre-S11 response set exactly (page 1, pageSize 500,
+    // sorted by timestamp desc) — the S8 benchmark script's requests are
+    // unaffected beyond the response now being wrapped in an envelope.
+    const all = await this.wallets.getTransactions(id, { skipCache });
+
+    return queryTransactions(all, {
+      chainId: parseIntParam(chain),
+      tokenSymbol: token || undefined,
+      // queryTransactions validates these itself and falls back to sane
+      // defaults for anything unrecognized — this cast just satisfies TS at
+      // the boundary where an arbitrary query string enters typed code.
+      sort: sort as TransactionSortField | undefined,
+      dir: dir as SortDirection | undefined,
+      page: parseIntParam(page),
+      pageSize: parseIntParam(pageSize),
+    });
   }
 
   @Post(':id/sync')
@@ -94,4 +119,13 @@ export class WalletsController {
     // exist, so no separate existence check is needed here.
     await this.wallets.remove(id);
   }
+}
+
+/** Undefined (not NaN) for a missing or non-numeric query param — treated
+ *  as "no filter/no override" by queryTransactions, rather than silently
+ *  filtering everything out on a malformed value. */
+function parseIntParam(value?: string): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
 }
