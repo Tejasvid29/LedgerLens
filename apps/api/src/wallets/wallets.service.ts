@@ -7,6 +7,7 @@ import { AggregatedHolding, aggregateHoldings, HoldingIssue } from './holdings';
 import {
   CACHE_POLICIES,
   walletDerivedKeys,
+  walletHoldingsKey,
   walletTransactionsKey,
 } from '../cache/cache.policy';
 
@@ -94,29 +95,33 @@ export class WalletsService {
   async getHoldings(
     walletId: string,
   ): Promise<{ holdings: SerializedHolding[]; issues: HoldingIssue[] }> {
-    const txs = await this.prisma.transaction.findMany({
-      where: { walletId },
-      select: {
-        chainId: true,
-        tokenAddress: true,
-        tokenSymbol: true,
-        rawValue: true,
-        decimals: true,
-        direction: true,
-        status: true,
-        timestamp: true,
-      },
-    });
+    const load = async () => {
+      const txs = await this.prisma.transaction.findMany({
+        where: { walletId },
+        select: {
+          chainId: true,
+          tokenAddress: true,
+          tokenSymbol: true,
+          rawValue: true,
+          decimals: true,
+          direction: true,
+          status: true,
+          timestamp: true,
+        },
+      });
 
-    const { holdings, issues } = aggregateHoldings(
-      txs.map((tx) => ({
-        ...tx,
-        direction: tx.direction as SerializedTransaction['direction'],
-        status: tx.status as SerializedTransaction['status'],
-      })),
-    );
+      const { holdings, issues } = aggregateHoldings(
+        txs.map((tx) => ({
+          ...tx,
+          direction: tx.direction as SerializedTransaction['direction'],
+          status: tx.status as SerializedTransaction['status'],
+        })),
+      );
 
-    return { holdings: holdings.map((h) => this.serializeHolding(h)), issues };
+      return { holdings: holdings.map((h) => this.serializeHolding(h)), issues };
+    };
+
+    return this.cache.swr(walletHoldingsKey(walletId), CACHE_POLICIES.walletHoldings, load);
   }
 
   private serializeHolding(h: AggregatedHolding): SerializedHolding {

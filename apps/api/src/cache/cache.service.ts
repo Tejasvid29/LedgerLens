@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { CachePolicy } from './cache.policy';
+import { LatencyStats, LatencyTracker } from '../metrics/latency-tracker';
 
 export interface CacheMetrics {
   /** Served from cache within its fresh window. */
@@ -63,6 +64,11 @@ export class CacheService implements OnModuleDestroy {
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
 
+  /** Redis round-trip latency (lookup/set/del). */
+  private readonly cacheLatency = new LatencyTracker();
+  /** loader() latency — the origin (Postgres) side of a miss or a revalidation. */
+  private readonly originLatency = new LatencyTracker();
+
   /**
    * Keys with a background revalidation already running. Without this, N
    * concurrent requests arriving on a stale key would each start their own
@@ -108,10 +114,13 @@ export class CacheService implements OnModuleDestroy {
     }
 
     let raw: string | null;
+    const start = Date.now();
     try {
       raw = await this.redis.get(key);
+      this.cacheLatency.record(Date.now() - start);
       this.recordSuccess();
     } catch {
+      this.cacheLatency.record(Date.now() - start);
       this.recordFailure();
       this.misses++;
       return { value: null, state: 'miss', ageSeconds: null };
@@ -165,9 +174,19 @@ export class CacheService implements OnModuleDestroy {
       return found.value as T;
     }
 
-    const value = await loader();
+    const value = await this.timedLoad(loader);
     await this.set(key, value, policy);
     return value;
+  }
+
+  /** Times a call to the origin (Postgres, via the caller's loader). */
+  private async timedLoad<T>(loader: () => Promise<T>): Promise<T> {
+    const start = Date.now();
+    try {
+      return await loader();
+    } finally {
+      this.originLatency.record(Date.now() - start);
+    }
   }
 
   private revalidateInBackground<T>(
@@ -178,7 +197,7 @@ export class CacheService implements OnModuleDestroy {
     if (this.revalidating.has(key)) return;
     this.revalidating.add(key);
 
-    void loader()
+    void this.timedLoad(loader)
       .then((value) => this.set(key, value, policy))
       .catch((err) => {
         // The caller already has a usable stale value; a failed refresh means
@@ -199,12 +218,15 @@ export class CacheService implements OnModuleDestroy {
 
     const envelope: Envelope<unknown> = { s: Date.now(), value };
     const physicalTtl = policy.ttlSeconds + policy.staleSeconds;
+    const start = Date.now();
 
     try {
       await this.redis.set(key, JSON.stringify(envelope), 'EX', physicalTtl);
+      this.cacheLatency.record(Date.now() - start);
       this.recordSuccess();
     } catch {
       // Fail open — the caller already has the value it tried to cache.
+      this.cacheLatency.record(Date.now() - start);
       this.recordFailure();
     }
   }
@@ -218,10 +240,13 @@ export class CacheService implements OnModuleDestroy {
       return;
     }
 
+    const start = Date.now();
     try {
       await this.redis.del(...keys);
+      this.cacheLatency.record(Date.now() - start);
       this.recordSuccess();
     } catch {
+      this.cacheLatency.record(Date.now() - start);
       this.recordFailure();
     }
   }
@@ -238,6 +263,11 @@ export class CacheService implements OnModuleDestroy {
     };
   }
 
+  /** Per-layer latency: the Redis round-trip vs. the origin (Postgres) query. */
+  getLatency(): { cache: LatencyStats; origin: LatencyStats } {
+    return { cache: this.cacheLatency.stats(), origin: this.originLatency.stats() };
+  }
+
   /** Test seam. Metrics are process-lifetime counters otherwise. */
   resetMetrics(): void {
     this.hits = 0;
@@ -245,6 +275,8 @@ export class CacheService implements OnModuleDestroy {
     this.misses = 0;
     this.errors = 0;
     this.shortCircuited = 0;
+    this.cacheLatency.reset();
+    this.originLatency.reset();
   }
 
   /**
