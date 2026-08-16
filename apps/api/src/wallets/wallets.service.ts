@@ -4,8 +4,11 @@ import { CacheService } from '../cache/cache.service';
 import { formatAmount, SerializedHolding, SerializedTransaction } from '@ledgerlens/shared';
 import { getChainConfig } from '../chain/chain.config';
 import { AggregatedHolding, aggregateHoldings, HoldingIssue } from './holdings';
-
-const CACHE_TTL = 300;
+import {
+  CACHE_POLICIES,
+  walletDerivedKeys,
+  walletTransactionsKey,
+} from '../cache/cache.policy';
 
 @Injectable()
 export class WalletsService {
@@ -14,12 +17,15 @@ export class WalletsService {
     private readonly cache: CacheService,
   ) {}
 
-  private cacheKey(walletId: string) {
-    return `wallet:${walletId}:transactions`;
-  }
-
+  /**
+   * Clears every read model derived from this wallet's transactions.
+   *
+   * Holdings and transactions are two views of the same rows — dropping one
+   * without the other lets the UI show a transfer that the balance above it
+   * doesn't include. walletDerivedKeys() is the single source of that list.
+   */
   async invalidateCache(walletId: string) {
-    await this.cache.del(this.cacheKey(walletId));
+    await this.cache.del(...walletDerivedKeys(walletId));
   }
 
   async list() {
@@ -57,26 +63,27 @@ export class WalletsService {
     walletId: string,
     options?: { skipCache?: boolean },
   ): Promise<SerializedTransaction[]> {
-    const key = this.cacheKey(walletId);
+    const load = async () => {
+      const txs = await this.prisma.transaction.findMany({
+        where: { walletId },
+        orderBy: { timestamp: 'desc' },
+        take: 500,
+      });
+      return txs.map((tx) => this.serializeTx(tx));
+    };
 
-    if (!options?.skipCache) {
-      const cached = await this.cache.get<SerializedTransaction[]>(key);
-      if (cached) return cached;
+    // skipCache is the baseline-measurement path (see docs/benchmarks) and the
+    // explicit ?nocache=true escape hatch — it must not read *or* write, or a
+    // baseline run would warm the cache it is supposed to be measuring without.
+    if (options?.skipCache) {
+      return load();
     }
 
-    const txs = await this.prisma.transaction.findMany({
-      where: { walletId },
-      orderBy: { timestamp: 'desc' },
-      take: 500,
-    });
-
-    const serialized = txs.map((tx) => this.serializeTx(tx));
-
-    if (!options?.skipCache) {
-      await this.cache.set(key, serialized, CACHE_TTL);
-    }
-
-    return serialized;
+    return this.cache.swr<SerializedTransaction[]>(
+      walletTransactionsKey(walletId),
+      CACHE_POLICIES.walletTransactions,
+      load,
+    );
   }
 
   /**
