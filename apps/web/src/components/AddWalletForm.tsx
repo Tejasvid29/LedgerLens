@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { isValidAddress } from '@ledgerlens/shared';
 import { createWallet } from '@/lib/api';
 
 /**
@@ -24,8 +25,9 @@ export function AddWalletForm() {
     e.preventDefault();
     setError(null);
 
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      // Same format across all 6 supported chains — this isn't Ethereum-only.
+    if (!isValidAddress(address)) {
+      // Same check the API re-runs server-side (packages/shared/src/address.ts)
+      // — this is just the fast, no-round-trip version.
       setError('Enter a valid wallet address (0x…, 42 characters).');
       return;
     }

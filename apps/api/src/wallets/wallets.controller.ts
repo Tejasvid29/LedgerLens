@@ -2,10 +2,12 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   NotFoundException,
   Query,
+  HttpCode,
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
 import { SyncService } from '../chain/sync.service';
@@ -83,5 +85,13 @@ export class WalletsController {
     const result = await this.syncService.syncWallet(id, body?.chains);
     await this.wallets.invalidateCache(id);
     return result;
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id') id: string) {
+    // wallets.remove() throws NotFoundException itself if the id doesn't
+    // exist, so no separate existence check is needed here.
+    await this.wallets.remove(id);
   }
 }

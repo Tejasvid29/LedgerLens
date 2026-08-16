@@ -1,3 +1,4 @@
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
@@ -195,6 +196,90 @@ describe('WalletsService.invalidateCache', () => {
 
     await service.invalidateCache('w1');
 
+    expect(cache.del).toHaveBeenCalledWith(walletTransactionsKey('w1'), walletHoldingsKey('w1'));
+  });
+});
+
+describe('WalletsService.create', () => {
+  let prisma: {
+    user: { findFirst: jest.Mock; create: jest.Mock };
+    wallet: { upsert: jest.Mock };
+  };
+  let cache: ReturnType<typeof makeFakeCache>;
+  let service: WalletsService;
+
+  beforeEach(() => {
+    prisma = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'u1' }),
+        create: jest.fn(),
+      },
+      wallet: { upsert: jest.fn().mockResolvedValue({ id: 'w1' }) },
+    };
+    cache = makeFakeCache();
+    service = new WalletsService(prisma as unknown as PrismaService, cache as unknown as CacheService);
+  });
+
+  it('rejects a malformed address with a message stating the expected format', async () => {
+    await expect(service.create('not-an-address')).rejects.toThrow(BadRequestException);
+    await expect(service.create('0x123')).rejects.toThrow(/0x-prefixed, 40-character hex/);
+    // Never touches the DB for input that fails validation.
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+    expect(prisma.wallet.upsert).not.toHaveBeenCalled();
+  });
+
+  it('lowercases a valid address before storing it', async () => {
+    const mixedCase = `0x${'A1b2'.repeat(10)}`;
+
+    await service.create(mixedCase, 'Main');
+
+    expect(prisma.wallet.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ address: mixedCase.toLowerCase() }),
+      }),
+    );
+  });
+});
+
+describe('WalletsService.remove', () => {
+  let prisma: {
+    wallet: { findUnique: jest.Mock; delete: jest.Mock };
+    transaction: { deleteMany: jest.Mock };
+    holding: { deleteMany: jest.Mock };
+    $transaction: jest.Mock;
+  };
+  let cache: ReturnType<typeof makeFakeCache>;
+  let service: WalletsService;
+
+  beforeEach(() => {
+    prisma = {
+      wallet: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'w1' }),
+        delete: jest.fn().mockResolvedValue({ id: 'w1' }),
+      },
+      transaction: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      holding: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
+    cache = makeFakeCache();
+    service = new WalletsService(prisma as unknown as PrismaService, cache as unknown as CacheService);
+  });
+
+  it('throws NotFoundException for a wallet that does not exist, without touching anything else', async () => {
+    prisma.wallet.findUnique.mockResolvedValue(null);
+
+    await expect(service.remove('missing')).rejects.toThrow(NotFoundException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(cache.del).not.toHaveBeenCalled();
+  });
+
+  it('deletes transactions and holdings before the wallet, in one transaction, then invalidates the cache', async () => {
+    await service.remove('w1');
+
+    expect(prisma.transaction.deleteMany).toHaveBeenCalledWith({ where: { walletId: 'w1' } });
+    expect(prisma.holding.deleteMany).toHaveBeenCalledWith({ where: { walletId: 'w1' } });
+    expect(prisma.wallet.delete).toHaveBeenCalledWith({ where: { id: 'w1' } });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(cache.del).toHaveBeenCalledWith(walletTransactionsKey('w1'), walletHoldingsKey('w1'));
   });
 });

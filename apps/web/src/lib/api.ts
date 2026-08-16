@@ -27,8 +27,21 @@ export interface HoldingsResponse {
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', ...init });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? 'GET'} ${path} failed: HTTP ${res.status}`);
+    // NestJS's default exception body is { statusCode, message, error } —
+    // message is what a BadRequestException/NotFoundException actually
+    // said (e.g. "Address must be a 0x-prefixed, 40-character hex
+    // string."). Falling back to the HTTP status alone would throw that
+    // away and show a useless "HTTP 400" instead of the real reason.
+    let message = `${init?.method ?? 'GET'} ${path} failed: HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.message === 'string') message = body.message;
+    } catch {
+      // Response wasn't JSON (or was empty) — keep the status-based fallback.
+    }
+    throw new Error(message);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -58,4 +71,8 @@ export async function syncWallet(walletId: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
+}
+
+export async function deleteWallet(walletId: string): Promise<void> {
+  await apiFetch(`/wallets/${walletId}`, { method: 'DELETE' });
 }

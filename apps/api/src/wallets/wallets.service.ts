@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { formatAmount, SerializedHolding, SerializedTransaction } from '@ledgerlens/shared';
+import { formatAmount, isValidAddress, SerializedHolding, SerializedTransaction } from '@ledgerlens/shared';
 import { getChainConfig } from '../chain/chain.config';
 import { AggregatedHolding, aggregateHoldings, HoldingIssue } from './holdings';
 import {
@@ -37,6 +37,14 @@ export class WalletsService {
   }
 
   async create(address: string, label?: string) {
+    // Validate before lowercasing/storage — same 0x+40-hex format across all
+    // 6 supported chains, so one check covers every chain, not just
+    // Ethereum. The client validates too, but this must not trust that: a
+    // direct API call bypasses the browser form entirely.
+    if (!isValidAddress(address)) {
+      throw new BadRequestException('Address must be a 0x-prefixed, 40-character hex string.');
+    }
+
     const normalized = address.toLowerCase();
 
     let user = await this.prisma.user.findFirst();
@@ -51,6 +59,26 @@ export class WalletsService {
       create: { address: normalized, label, userId: user.id },
       update: { label: label ?? undefined },
     });
+  }
+
+  /**
+   * Deletes a wallet and everything derived from it. Transaction and
+   * Holding rows FK to Wallet without an onDelete cascade (see
+   * schema.prisma), so they're deleted first, in one transaction, to avoid
+   * an FK violation and to avoid ever leaving orphaned rows if this fails
+   * partway through.
+   */
+  async remove(id: string) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { id } });
+    if (!wallet) throw new NotFoundException('Wallet not found');
+
+    await this.prisma.$transaction([
+      this.prisma.transaction.deleteMany({ where: { walletId: id } }),
+      this.prisma.holding.deleteMany({ where: { walletId: id } }),
+      this.prisma.wallet.delete({ where: { id } }),
+    ]);
+
+    await this.invalidateCache(id);
   }
 
   async findById(id: string) {

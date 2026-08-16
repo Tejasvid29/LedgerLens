@@ -54,3 +54,4 @@ export interface SerializedHolding {
 }
 
 export { formatAmount } from './amounts';
+export { isValidAddress } from './address';
