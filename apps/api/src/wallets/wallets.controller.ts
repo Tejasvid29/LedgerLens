@@ -49,15 +49,21 @@ export class WalletsController {
   async transactions(
     @Param('id') id: string,
     @Query('refresh') refresh?: string,
+    @Query('baseline') baseline?: string,
+    @Query('nocache') nocache?: string,
   ) {
     const wallet = await this.wallets.findById(id);
     if (!wallet) throw new NotFoundException('Wallet not found');
 
-    if (refresh === 'true') {
+    const skipCache = nocache === 'true' || baseline === 'true';
+
+    // baseline=true: sync from Alchemy on every load — the "before" measurement path
+    if (refresh === 'true' || baseline === 'true') {
       await this.syncService.syncWallet(id);
+      await this.wallets.invalidateCache(id);
     }
 
-    return this.wallets.getTransactions(id);
+    return this.wallets.getTransactions(id, { skipCache });
   }
 
   @Post(':id/sync')
@@ -67,7 +73,8 @@ export class WalletsController {
   ) {
     const wallet = await this.wallets.findById(id);
     if (!wallet) throw new NotFoundException('Wallet not found');
-    return this.syncService.syncWallet(id, body?.chains);
+    const result = await this.syncService.syncWallet(id, body?.chains);
+    await this.wallets.invalidateCache(id);
+    return result;
   }
-
 }

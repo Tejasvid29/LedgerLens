@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { formatAmount } from '../chain/normalizer';
+import { formatAmount, SerializedTransaction } from '@ledgerlens/shared';
 import { getChainConfig } from '../chain/chain.config';
 
-const CACHE_TTL = 300; // 5 minutes — baseline measurement uses refresh=true to bypass
+const CACHE_TTL = 300;
 
 @Injectable()
 export class WalletsService {
@@ -12,6 +12,14 @@ export class WalletsService {
     private readonly prisma: PrismaService,
     private readonly cache: CacheService,
   ) {}
+
+  private cacheKey(walletId: string) {
+    return `wallet:${walletId}:transactions`;
+  }
+
+  async invalidateCache(walletId: string) {
+    await this.cache.del(this.cacheKey(walletId));
+  }
 
   async list() {
     return this.prisma.wallet.findMany({
@@ -44,11 +52,16 @@ export class WalletsService {
     });
   }
 
-  async getTransactions(walletId: string) {
-    const cacheKey = `wallet:${walletId}:transactions`;
+  async getTransactions(
+    walletId: string,
+    options?: { skipCache?: boolean },
+  ): Promise<SerializedTransaction[]> {
+    const key = this.cacheKey(walletId);
 
-    const cached = await this.cache.get<ReturnType<typeof this.serializeTx>[]>(cacheKey);
-    if (cached) return cached;
+    if (!options?.skipCache) {
+      const cached = await this.cache.get<SerializedTransaction[]>(key);
+      if (cached) return cached;
+    }
 
     const txs = await this.prisma.transaction.findMany({
       where: { walletId },
@@ -57,7 +70,11 @@ export class WalletsService {
     });
 
     const serialized = txs.map((tx) => this.serializeTx(tx));
-    await this.cache.set(cacheKey, serialized, CACHE_TTL);
+
+    if (!options?.skipCache) {
+      await this.cache.set(key, serialized, CACHE_TTL);
+    }
+
     return serialized;
   }
 
@@ -73,7 +90,7 @@ export class WalletsService {
     tokenSymbol: string;
     tokenAddress: string | null;
     status: string;
-  }) {
+  }): SerializedTransaction {
     const chain = getChainConfig(tx.chainId);
     return {
       id: tx.id,
@@ -82,13 +99,13 @@ export class WalletsService {
       hash: tx.hash,
       blockNumber: tx.blockNumber.toString(),
       timestamp: tx.timestamp.toISOString(),
-      direction: tx.direction,
+      direction: tx.direction as SerializedTransaction['direction'],
       rawValue: tx.rawValue,
       decimals: tx.decimals,
       displayAmount: formatAmount(tx.rawValue, tx.decimals),
       tokenSymbol: tx.tokenSymbol,
       tokenAddress: tx.tokenAddress,
-      status: tx.status,
+      status: tx.status as SerializedTransaction['status'],
     };
   }
 }
