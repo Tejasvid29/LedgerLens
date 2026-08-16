@@ -54,7 +54,12 @@ describe('SyncService', () => {
 
     expect(alchemy.fetchTransactions).toHaveBeenCalledWith('0xwallet', 'ethereum');
     expect(alchemy.fetchTransactions).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ walletId: 'w1', totalSynced: 1, chains: ['ethereum'] });
+    expect(result).toEqual({
+      walletId: 'w1',
+      totalSynced: 1,
+      chains: ['ethereum'],
+      errors: [],
+    });
   });
 
   it('upserts on (chainId, hash, walletId)', async () => {
@@ -167,6 +172,16 @@ describe('SyncService', () => {
     expect(prisma.wallet.update).toHaveBeenCalled();
   });
 
+  it('collects the failing chain and its message rather than only logging it', async () => {
+    alchemy.fetchTransactions
+      .mockResolvedValueOnce([makeTx()])
+      .mockRejectedValueOnce(new Error('Alchemy rate limited'));
+
+    const result = await service.syncWallet('w1', ['ethereum', 'polygon']);
+
+    expect(result.errors).toEqual([{ chain: 'polygon', message: 'Alchemy rate limited' }]);
+  });
+
   it('does not throw when every chain fails — the caller gets a result, not an exception', async () => {
     alchemy.fetchTransactions.mockRejectedValue(new Error('Alchemy down'));
 
@@ -174,6 +189,19 @@ describe('SyncService', () => {
 
     expect(result.totalSynced).toBe(0);
     expect(prisma.transaction.upsert).not.toHaveBeenCalled();
+    expect(result.errors).toHaveLength(2);
+    expect(result.errors.map((e) => e.chain).sort()).toEqual(['ethereum', 'polygon']);
+    // A total failure still updates lastSyncedAt — the sync itself didn't
+    // throw, so pretending it never happened would be wrong too.
+    expect(prisma.wallet.update).toHaveBeenCalled();
+  });
+
+  it('records a non-Error rejection as a string, not "[object Object]"', async () => {
+    alchemy.fetchTransactions.mockRejectedValue('rate limited');
+
+    const result = await service.syncWallet('w1', ['ethereum']);
+
+    expect(result.errors).toEqual([{ chain: 'ethereum', message: 'rate limited' }]);
   });
 
   it('defaults to every configured chain when none are specified', async () => {
@@ -184,5 +212,68 @@ describe('SyncService', () => {
     const chainKeys = Object.keys(CHAINS);
     expect(result.chains).toEqual(chainKeys);
     expect(alchemy.fetchTransactions).toHaveBeenCalledTimes(chainKeys.length);
+    expect(result.errors).toEqual([]);
+  });
+
+  describe('bounded concurrency', () => {
+    it('runs all 6 default chains, not just a pool-sized subset', async () => {
+      alchemy.fetchTransactions.mockResolvedValue([]);
+
+      const result = await service.syncWallet('w1');
+
+      expect(result.chains).toHaveLength(6);
+      expect(alchemy.fetchTransactions).toHaveBeenCalledTimes(6);
+    });
+
+    it('never has more than 3 chain fetches in flight at once', async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+
+      alchemy.fetchTransactions.mockImplementation(async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return [];
+      });
+
+      await service.syncWallet('w1');
+
+      expect(maxInFlight).toBeLessThanOrEqual(3);
+      expect(maxInFlight).toBeGreaterThan(1); // and it is actually concurrent, not serial
+    });
+
+    it('a slow chain does not block a fast one from finishing first (pooled, not chunked)', async () => {
+      const order: string[] = [];
+      alchemy.fetchTransactions.mockImplementation(async (_addr: string, chain: string) => {
+        const delay = chain === 'ethereum' ? 20 : 1;
+        await new Promise((r) => setTimeout(r, delay));
+        order.push(chain);
+        return [];
+      });
+
+      // 4 chains through a pool of 3: if slot 1 (ethereum) is slow, the 4th
+      // chain should start as soon as any of the first 3 finish, not wait
+      // for the whole first batch — proving a work-stealing pool, not chunks.
+      await service.syncWallet('w1', ['ethereum', 'polygon', 'arbitrum', 'base']);
+
+      expect(order.indexOf('polygon')).toBeLessThan(order.indexOf('ethereum'));
+      expect(order.indexOf('base')).toBeLessThan(order.indexOf('ethereum'));
+    });
+
+    it('total time for 6 chains is roughly 2 rounds, not 6 sequential ones', async () => {
+      alchemy.fetchTransactions.mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return [];
+      });
+
+      const start = Date.now();
+      await service.syncWallet('w1');
+      const elapsed = Date.now() - start;
+
+      // 6 chains / pool of 3 ≈ 2 rounds of 20ms ≈ 40ms. 6 sequential would be
+      // ≈120ms. Generous ceiling to avoid CI flakiness.
+      expect(elapsed).toBeLessThan(90);
+    });
   });
 });
