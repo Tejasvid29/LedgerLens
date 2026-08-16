@@ -59,7 +59,25 @@ export class OpenAIInsightProvider implements InsightProvider {
       throw new InternalServerErrorException('OpenAI response did not include a summary.');
     }
 
-    return { summary: summary.trim(), model: MODEL, generatedAt: new Date().toISOString() };
+    return {
+      summary: summary.trim(),
+      model: MODEL,
+      generatedAt: new Date().toISOString(),
+      usage: this.parseUsage(data?.usage),
+    };
+  }
+
+  /** OpenAI's usage block is the real, billed figure — this is what S15's
+   *  spend measurement actually sums when run with --provider=openai.
+   *  Missing/malformed usage degrades to zeros rather than throwing: a
+   *  summary the caller can use is more valuable than failing the whole
+   *  request over an accounting field. */
+  private parseUsage(usage: unknown): { promptTokens: number; completionTokens: number; totalTokens: number } {
+    const u = usage as { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown } | undefined;
+    const promptTokens = typeof u?.prompt_tokens === 'number' ? u.prompt_tokens : 0;
+    const completionTokens = typeof u?.completion_tokens === 'number' ? u.completion_tokens : 0;
+    const totalTokens = typeof u?.total_tokens === 'number' ? u.total_tokens : promptTokens + completionTokens;
+    return { promptTokens, completionTokens, totalTokens };
   }
 
   private resolveApiKey(): string {

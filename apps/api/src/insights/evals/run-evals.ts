@@ -10,31 +10,9 @@
  * does NOT cover this — OpenAI bills API usage separately from consumer
  * subscriptions, so --provider=openai needs a funded platform account.
  */
-import { ConfigService } from '@nestjs/config';
 import { runEvals } from './harness';
-import { StubInsightProvider } from './stub-insight.provider';
-import { OpenAIInsightProvider } from '../openai-insight.provider';
-import { InsightProvider } from '../insight-provider.interface';
+import { resolveProviderFromArgv } from './resolve-provider';
 import type { EvalReport } from './harness';
-
-function resolveProvider(): { provider: InsightProvider; name: string } {
-  const arg = process.argv.find((a) => a.startsWith('--provider='))?.split('=')[1] ?? 'stub';
-
-  if (arg === 'openai') {
-    // Minimal ConfigService standing in for Nest's DI — this script runs
-    // outside the Nest application context, and the provider only needs
-    // one key from it.
-    const config = new ConfigService();
-    return { provider: new OpenAIInsightProvider(config), name: 'openai (billed)' };
-  }
-
-  if (arg !== 'stub') {
-    console.error(`Unknown --provider=${arg}. Expected "stub" or "openai".`);
-    process.exit(1);
-  }
-
-  return { provider: new StubInsightProvider(), name: 'stub (offline, free)' };
-}
 
 function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -85,7 +63,7 @@ function printReport(report: EvalReport, providerName: string): void {
 }
 
 async function main() {
-  const { provider, name } = resolveProvider();
+  const { provider, name } = resolveProviderFromArgv();
   printReport(await runEvals(provider), name);
 }
 

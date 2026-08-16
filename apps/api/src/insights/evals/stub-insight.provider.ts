@@ -1,4 +1,21 @@
-import { InsightProvider, InsightRequest, InsightResult } from '../insight-provider.interface';
+import { InsightProvider, InsightRequest, InsightResult, TokenUsage } from '../insight-provider.interface';
+import { buildInsightPrompt } from '../prompt';
+
+/**
+ * ~4 characters per token is OpenAI's own commonly-cited rule of thumb for
+ * English text — not exact, but close enough to make the stub's usage
+ * figures a believable stand-in for a real provider's, which is the whole
+ * point: the spend-measurement script (evals/measure-spend.ts) needs
+ * *some* number to sum per request when running for free, and an estimate
+ * that scales with actual prompt/summary length is far more honest than a
+ * flat constant would be. Always labeled "estimated", never presented as
+ * a real billed figure.
+ */
+const CHARS_PER_TOKEN = 4;
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / CHARS_PER_TOKEN));
+}
 
 /**
  * A deterministic, offline InsightProvider that costs nothing to run.
@@ -15,11 +32,25 @@ import { InsightProvider, InsightRequest, InsightResult } from '../insight-provi
  */
 export class StubInsightProvider implements InsightProvider {
   async generateInsight(request: InsightRequest): Promise<InsightResult> {
+    const summary = this.buildSummary(request);
+
     return {
-      summary: this.buildSummary(request),
+      summary,
       model: 'stub',
       generatedAt: new Date().toISOString(),
+      usage: this.estimateUsage(request, summary),
     };
+  }
+
+  /** Estimated from the same prompt buildInsightPrompt would actually
+   *  send to a real model — not from the (much shorter) mechanical
+   *  summary text alone, since a real prompt's token cost is dominated by
+   *  the input data, not the output. */
+  private estimateUsage(request: InsightRequest, summary: string): TokenUsage {
+    const { system, user } = buildInsightPrompt(request);
+    const promptTokens = estimateTokens(system) + estimateTokens(user);
+    const completionTokens = estimateTokens(summary);
+    return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
   }
 
   private buildSummary(request: InsightRequest): string {

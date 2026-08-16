@@ -1,6 +1,8 @@
+import { Logger } from '@nestjs/common';
 import { InsightsService } from './insights.service';
 import { WalletsService } from '../wallets/wallets.service';
-import { InsightProvider, InsightRequest } from './insight-provider.interface';
+import { CacheService } from '../cache/cache.service';
+import { InsightProvider, InsightRequest, InsightResult } from './insight-provider.interface';
 import { SerializedHolding, SerializedTransaction } from '@ledgerlens/shared';
 
 function makeHolding(overrides: Partial<SerializedHolding> = {}): SerializedHolding {
@@ -35,8 +37,27 @@ function makeTx(overrides: Partial<SerializedTransaction> = {}): SerializedTrans
   };
 }
 
+const USAGE = { promptTokens: 100, completionTokens: 20, totalTokens: 120 };
+
+/** Minimal in-memory stand-in for CacheService's lookup/set contract —
+ *  real enough that these tests exercise InsightsService's actual cache
+ *  key (hashInsightRequest + insightKey), not a mocked-away shortcut. */
+function makeFakeCache() {
+  const store = new Map<string, unknown>();
+  return {
+    lookup: jest.fn(async (key: string) => {
+      if (store.has(key)) return { value: store.get(key), state: 'fresh' as const, ageSeconds: 0 };
+      return { value: null, state: 'miss' as const, ageSeconds: null };
+    }),
+    set: jest.fn(async (key: string, value: unknown) => {
+      store.set(key, value);
+    }),
+  };
+}
+
 describe('InsightsService.generateForWallet', () => {
   let wallets: { getHoldings: jest.Mock; getTransactions: jest.Mock };
+  let cache: ReturnType<typeof makeFakeCache>;
   let provider: { generateInsight: jest.Mock };
   let service: InsightsService;
 
@@ -45,15 +66,18 @@ describe('InsightsService.generateForWallet', () => {
       getHoldings: jest.fn().mockResolvedValue({ holdings: [], issues: [] }),
       getTransactions: jest.fn().mockResolvedValue([]),
     };
+    cache = makeFakeCache();
     provider = {
       generateInsight: jest.fn().mockResolvedValue({
         summary: 'A summary.',
         model: 'test-model',
         generatedAt: '2024-01-01T00:00:00.000Z',
-      }),
+        usage: USAGE,
+      } satisfies InsightResult),
     };
     service = new InsightsService(
       wallets as unknown as WalletsService,
+      cache as unknown as CacheService,
       provider as unknown as InsightProvider,
     );
   });
@@ -100,13 +124,96 @@ describe('InsightsService.generateForWallet', () => {
     expect(request.address).toBe('0xdeadbeef');
   });
 
-  it('returns exactly what the provider returns', async () => {
+  it('returns the provider result plus cached: false on a first (miss) call', async () => {
     const result = await service.generateForWallet('w1', { label: null, address: '0xabc' });
 
     expect(result).toEqual({
       summary: 'A summary.',
       model: 'test-model',
       generatedAt: '2024-01-01T00:00:00.000Z',
+      usage: USAGE,
+      cached: false,
+    });
+  });
+
+  describe('caching', () => {
+    it('calls the provider once, then serves the second identical request from cache without calling it again', async () => {
+      const wallet = { label: 'Main', address: '0xabc' };
+
+      const first = await service.generateForWallet('w1', wallet);
+      const second = await service.generateForWallet('w1', wallet);
+
+      expect(provider.generateInsight).toHaveBeenCalledTimes(1);
+      expect(first.cached).toBe(false);
+      expect(second.cached).toBe(true);
+      expect(second.summary).toBe(first.summary);
+    });
+
+    it('calls the provider again when the underlying holdings changed between requests', async () => {
+      const wallet = { label: 'Main', address: '0xabc' };
+
+      await service.generateForWallet('w1', wallet);
+
+      wallets.getHoldings.mockResolvedValue({
+        holdings: [makeHolding({ displayBalance: '2' })],
+        issues: [],
+      });
+      await service.generateForWallet('w1', wallet);
+
+      expect(provider.generateInsight).toHaveBeenCalledTimes(2);
+    });
+
+    it('shares a cache entry across two different wallet ids with identical financial data — the key is content-addressed, not id-addressed', async () => {
+      const wallet = { label: 'Main', address: '0xabc' };
+
+      await service.generateForWallet('wallet-one', wallet);
+      const second = await service.generateForWallet('wallet-two', wallet);
+
+      expect(provider.generateInsight).toHaveBeenCalledTimes(1);
+      expect(second.cached).toBe(true);
+    });
+
+    it('stores the result under CACHE_POLICIES.insight', async () => {
+      await service.generateForWallet('w1', { label: 'Main', address: '0xabc' });
+
+      expect(cache.set).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ summary: 'A summary.' }),
+        expect.objectContaining({ ttlSeconds: expect.any(Number) }),
+      );
+    });
+  });
+
+  describe('token usage logging', () => {
+    let logSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      logSpy.mockRestore();
+    });
+
+    it('logs spent tokens on a cache miss', async () => {
+      await service.generateForWallet('w1', { label: 'Main', address: '0xabc' });
+
+      const message = logSpy.mock.calls.map((c) => String(c[0])).find((m) => m.includes('wallet=w1'));
+      expect(message).toMatch(/cache=MISS/);
+      expect(message).toMatch(/spent=120 tokens/);
+    });
+
+    it('logs zero spend on a cache hit, while still showing what it would have cost', async () => {
+      const wallet = { label: 'Main', address: '0xabc' };
+      await service.generateForWallet('w1', wallet);
+      logSpy.mockClear();
+
+      await service.generateForWallet('w1', wallet);
+
+      const message = logSpy.mock.calls.map((c) => String(c[0])).find((m) => m.includes('wallet=w1'));
+      expect(message).toMatch(/cache=HIT/);
+      expect(message).toMatch(/spent=0/);
+      expect(message).toMatch(/120/); // the figure it would have cost
     });
   });
 });

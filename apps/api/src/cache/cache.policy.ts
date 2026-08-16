@@ -50,6 +50,22 @@ export interface CachePolicy {
 export const CACHE_POLICIES = {
   walletTransactions: { ttlSeconds: 300, staleSeconds: 300 },
   walletHoldings: { ttlSeconds: 300, staleSeconds: 300 },
+  /**
+   * staleSeconds: 0, deliberately unlike the two policies above. Serving a
+   * stale entry while revalidating in the background (the SWR pattern
+   * CacheService.swr implements) means the background call runs on its
+   * own schedule, detached from any specific request — for a free
+   * Postgres read that's a fine trade against load. For an insight, the
+   * "background call" is a billed OpenAI request with no request to
+   * attribute its cost or its errors to. InsightsService therefore
+   * doesn't use swr() for this policy at all; it uses lookup() directly
+   * and treats anything not fresh as a miss, so every dollar spent is
+   * spent inside a request that's waiting on it. ttlSeconds is generous
+   * (1 hour) because the key is content-addressed (see
+   * insight-cache-key.ts) — a real miss only happens when the wallet's
+   * data actually changes, not on a timer.
+   */
+  insight: { ttlSeconds: 3600, staleSeconds: 0 },
 } as const satisfies Record<string, CachePolicy>;
 
 /**
@@ -96,6 +112,16 @@ export function walletTransactionsKey(walletId: string): string {
 
 export function walletHoldingsKey(walletId: string): string {
   return key('wallet', walletId, 'holdings');
+}
+
+/**
+ * Takes an already-computed content hash rather than an InsightRequest —
+ * this file stays free of any feature module's domain types (it's a key
+ * registry, not a place that knows what an insight is). The hashing logic
+ * itself lives in insights/insight-cache-key.ts, which does know.
+ */
+export function insightKey(contentHash: string): string {
+  return key('insight', contentHash);
 }
 
 /**

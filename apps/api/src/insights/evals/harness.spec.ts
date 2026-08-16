@@ -4,6 +4,8 @@ import { StubInsightProvider } from './stub-insight.provider';
 import { InsightProvider, InsightRequest, InsightResult } from '../insight-provider.interface';
 import { RECENT_TRANSACTIONS_LIMIT } from '../insights.service';
 
+const NO_USAGE = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
 /** Invents a fiat valuation it was never given — the canonical
  *  hallucination this harness is built to detect. */
 class HallucinatingProvider implements InsightProvider {
@@ -12,6 +14,7 @@ class HallucinatingProvider implements InsightProvider {
       summary: 'This wallet is worth about $87,432 and gained 12% this month.',
       model: 'hallucinating-stub',
       generatedAt: new Date().toISOString(),
+      usage: NO_USAGE,
     };
   }
 }
@@ -123,7 +126,7 @@ describe('runEvals', () => {
       async generateInsight(request: InsightRequest) {
         order.push(request.address);
         await new Promise((r) => setTimeout(r, 1));
-        return { summary: 'ok', model: 'recording', generatedAt: new Date().toISOString() };
+        return { summary: 'ok', model: 'recording', generatedAt: new Date().toISOString(), usage: NO_USAGE };
       },
     };
 

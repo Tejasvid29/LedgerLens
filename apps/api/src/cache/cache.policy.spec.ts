@@ -3,6 +3,7 @@ import {
   CACHE_SCHEMA_VERSION,
   describeFreshness,
   FRESHNESS_WINDOW_SECONDS,
+  insightKey,
   walletDerivedKeys,
   walletHoldingsKey,
   walletTransactionsKey,
@@ -31,6 +32,11 @@ describe('cache keys', () => {
     expect(keys).toContain(walletTransactionsKey('w1'));
     expect(keys).toContain(walletHoldingsKey('w1'));
   });
+
+  it('namespaces insight keys with the schema version too, scoped to the content hash given', () => {
+    expect(insightKey('abc').startsWith(`${CACHE_SCHEMA_VERSION}:`)).toBe(true);
+    expect(insightKey('abc')).not.toBe(insightKey('def'));
+  });
 });
 
 describe('cache policies', () => {
@@ -42,6 +48,18 @@ describe('cache policies', () => {
 
   it('allows a stale window, so SWR has something to serve', () => {
     expect(CACHE_POLICIES.walletTransactions.staleSeconds).toBeGreaterThan(0);
+  });
+
+  it('gives insight caching zero stale window — unlike the read-model policies above', () => {
+    // Deliberate asymmetry: a stale-served insight would trigger a
+    // background-billed OpenAI call with no request to attribute it to.
+    // InsightsService treats "not fresh" as a miss for this exact reason —
+    // see the comment on CACHE_POLICIES.insight.
+    expect(CACHE_POLICIES.insight.staleSeconds).toBe(0);
+  });
+
+  it('gives insight caching a longer TTL than the read models — its key is content-addressed, not time-addressed', () => {
+    expect(CACHE_POLICIES.insight.ttlSeconds).toBeGreaterThan(CACHE_POLICIES.walletTransactions.ttlSeconds);
   });
 });
 

@@ -24,10 +24,24 @@ export interface InsightRequest {
   }[];
 }
 
+/**
+ * Real for OpenAIInsightProvider (parsed from the API response's `usage`
+ * field). A provider that doesn't tokenize per se (StubInsightProvider)
+ * still returns this, computed as a clearly-labeled estimate — the point
+ * is that InsightsService can log spend per request regardless of which
+ * provider is behind the interface, not just the real one.
+ */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface InsightResult {
   summary: string;
   model: string;
   generatedAt: string;
+  usage: TokenUsage;
 }
 
 /**

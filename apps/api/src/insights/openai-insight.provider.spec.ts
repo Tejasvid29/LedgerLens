@@ -67,6 +67,31 @@ describe('OpenAIInsightProvider', () => {
     expect(() => new Date(result.generatedAt).toISOString()).not.toThrow();
   });
 
+  it('parses real token usage from the API response', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'Summary.' } }],
+        usage: { prompt_tokens: 120, completion_tokens: 40, total_tokens: 160 },
+      }),
+    });
+
+    const result = await provider.generateInsight(makeRequest());
+
+    expect(result.usage).toEqual({ promptTokens: 120, completionTokens: 40, totalTokens: 160 });
+  });
+
+  it('degrades to zeroed usage rather than throwing when the response omits it', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'Summary.' } }] }),
+    });
+
+    const result = await provider.generateInsight(makeRequest());
+
+    expect(result.usage).toEqual({ promptTokens: 0, completionTokens: 0, totalTokens: 0 });
+  });
+
   it('throws with the HTTP status and body when OpenAI returns a non-ok response', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 429, text: async () => 'rate limited' });
 

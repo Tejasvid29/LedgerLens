@@ -11,9 +11,12 @@ export class InsightsController {
     private readonly insights: InsightsService,
   ) {}
 
-  // POST, not GET: this calls out to an LLM on every request (no caching
-  // yet — that's S15) and costs real money each time, so it reads as an
-  // action rather than an idempotent fetch, same reasoning as /sync.
+  // POST, not GET: this can call out to a billed LLM (a cache miss does),
+  // so it reads as an action rather than an idempotent fetch, same
+  // reasoning as /sync. S15 added semantic caching in front of the actual
+  // spend — see InsightsService — but the endpoint's shape doesn't change
+  // because of it: a cache hit is still conceptually "generate an insight
+  // for this wallet", just a free one.
   @Post(':id/insight')
   @UseGuards(ServiceAuthGuard)
   async generate(@CurrentUser() user: AuthedUser, @Param('id') id: string) {
