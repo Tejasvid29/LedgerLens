@@ -1,0 +1,188 @@
+import { NormalizedTransaction } from '@ledgerlens/shared';
+import { SyncService } from './sync.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { AlchemyService } from './alchemy.service';
+import { CHAINS } from './chain.config';
+
+function makeTx(overrides: Partial<NormalizedTransaction> = {}): NormalizedTransaction {
+  return {
+    chainId: 1,
+    hash: '0xabc',
+    blockNumber: 100n,
+    timestamp: new Date('2024-01-15T12:00:00.000Z'),
+    direction: 'IN',
+    rawValue: '1000000000000000000',
+    decimals: 18,
+    tokenSymbol: 'ETH',
+    tokenAddress: null,
+    gasUsed: null,
+    gasPriceWei: null,
+    status: 'SUCCESS',
+    ...overrides,
+  };
+}
+
+describe('SyncService', () => {
+  let prisma: {
+    wallet: { findUniqueOrThrow: jest.Mock; update: jest.Mock };
+    transaction: { upsert: jest.Mock };
+  };
+  let alchemy: { fetchTransactions: jest.Mock };
+  let service: SyncService;
+
+  beforeEach(() => {
+    prisma = {
+      wallet: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'w1', address: '0xwallet' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      transaction: {
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+    };
+    alchemy = { fetchTransactions: jest.fn() };
+    service = new SyncService(
+      prisma as unknown as PrismaService,
+      alchemy as unknown as AlchemyService,
+    );
+  });
+
+  it('fetches from Alchemy (already normalized) and persists for one wallet on one chain', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([makeTx()]);
+
+    const result = await service.syncWallet('w1', ['ethereum']);
+
+    expect(alchemy.fetchTransactions).toHaveBeenCalledWith('0xwallet', 'ethereum');
+    expect(alchemy.fetchTransactions).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ walletId: 'w1', totalSynced: 1, chains: ['ethereum'] });
+  });
+
+  it('upserts on (chainId, hash, walletId)', async () => {
+    const tx = makeTx();
+    alchemy.fetchTransactions.mockResolvedValue([tx]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.transaction.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          chainId_hash_walletId: { chainId: tx.chainId, hash: tx.hash, walletId: 'w1' },
+        },
+      }),
+    );
+  });
+
+  it('never inserts — upsert covers both new and re-synced transactions (rule 6)', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([makeTx()]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.transaction.upsert).toHaveBeenCalledTimes(1);
+    // No separate create/findFirst-then-create path exists on the mock.
+    expect(Object.keys(prisma.transaction)).toEqual(['upsert']);
+  });
+
+  it('creates with the full normalized transaction plus walletId', async () => {
+    const tx = makeTx({ tokenAddress: '0xusdc' });
+    alchemy.fetchTransactions.mockResolvedValue([tx]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.transaction.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: { ...tx, walletId: 'w1' } }),
+    );
+  });
+
+  it('the update branch omits the key fields — chainId/hash/walletId are immutable', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([makeTx()]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    const call = prisma.transaction.upsert.mock.calls[0][0];
+    expect(call.update).not.toHaveProperty('walletId');
+    expect(call.update).not.toHaveProperty('hash');
+    expect(call.update).not.toHaveProperty('chainId');
+  });
+
+  it('persists rawValue as a string, unmodified — no numeric coercion (rule 1)', async () => {
+    const huge = '123456789012345678901234567890';
+    alchemy.fetchTransactions.mockResolvedValue([makeTx({ rawValue: huge })]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    const { create } = prisma.transaction.upsert.mock.calls[0][0];
+    expect(create.rawValue).toBe(huge);
+    expect(typeof create.rawValue).toBe('string');
+  });
+
+  it('persists each transaction from one chain individually', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([
+      makeTx({ hash: '0x1' }),
+      makeTx({ hash: '0x2' }),
+    ]);
+
+    const result = await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.transaction.upsert).toHaveBeenCalledTimes(2);
+    expect(result.totalSynced).toBe(2);
+  });
+
+  it('records zero synced transactions without error for an empty history', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([]);
+
+    const result = await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.transaction.upsert).not.toHaveBeenCalled();
+    expect(result.totalSynced).toBe(0);
+  });
+
+  it('updates lastSyncedAt after a sync, including an empty one', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([]);
+
+    await service.syncWallet('w1', ['ethereum']);
+
+    expect(prisma.wallet.update).toHaveBeenCalledWith({
+      where: { id: 'w1' },
+      data: { lastSyncedAt: expect.any(Date) },
+    });
+  });
+
+  it('propagates when the wallet does not exist and fetches nothing', async () => {
+    prisma.wallet.findUniqueOrThrow.mockRejectedValue(new Error('not found'));
+
+    await expect(service.syncWallet('missing', ['ethereum'])).rejects.toThrow('not found');
+    expect(alchemy.fetchTransactions).not.toHaveBeenCalled();
+  });
+
+  it('one chain failing does not lose transactions already synced from another', async () => {
+    alchemy.fetchTransactions
+      .mockResolvedValueOnce([makeTx({ chainId: 1, hash: '0x1' })])
+      .mockRejectedValueOnce(new Error('Alchemy rate limited'));
+
+    const result = await service.syncWallet('w1', ['ethereum', 'polygon']);
+
+    expect(result.totalSynced).toBe(1);
+    expect(prisma.transaction.upsert).toHaveBeenCalledTimes(1);
+    // A partial failure degrades completeness, not the sync as a whole.
+    expect(prisma.wallet.update).toHaveBeenCalled();
+  });
+
+  it('does not throw when every chain fails — the caller gets a result, not an exception', async () => {
+    alchemy.fetchTransactions.mockRejectedValue(new Error('Alchemy down'));
+
+    const result = await service.syncWallet('w1', ['ethereum', 'polygon']);
+
+    expect(result.totalSynced).toBe(0);
+    expect(prisma.transaction.upsert).not.toHaveBeenCalled();
+  });
+
+  it('defaults to every configured chain when none are specified', async () => {
+    alchemy.fetchTransactions.mockResolvedValue([]);
+
+    const result = await service.syncWallet('w1');
+
+    const chainKeys = Object.keys(CHAINS);
+    expect(result.chains).toEqual(chainKeys);
+    expect(alchemy.fetchTransactions).toHaveBeenCalledTimes(chainKeys.length);
+  });
+});
