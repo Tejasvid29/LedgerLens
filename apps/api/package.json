@@ -17,6 +17,7 @@
     "@nestjs/core": "^10.4.15",
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/config": "^3.3.0",
+    "@ledgerlens/shared": "*",
     "@prisma/client": "^6.3.1",
     "alchemy-sdk": "^3.5.1",
     "ioredis": "^5.4.2",
