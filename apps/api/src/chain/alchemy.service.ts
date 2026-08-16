@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Alchemy, AssetTransfersCategory } from 'alchemy-sdk';
 import { NormalizedTransaction } from '@ledgerlens/shared';
+import { ChainProvider } from './chain-provider.interface';
 import { CHAINS, ChainConfig } from './chain.config';
 import { normalizeTransfers, RawAlchemyAssetTransfer } from './normalizer';
 
 @Injectable()
-export class AlchemyService {
+export class AlchemyService implements ChainProvider {
   private readonly logger = new Logger(AlchemyService.name);
   private readonly clients = new Map<number, Alchemy>();
 

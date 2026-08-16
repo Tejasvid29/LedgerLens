@@ -11,10 +11,12 @@
     "dev:web": "npm run dev -w @ledgerlens/web",
     "build": "npm run build -w @ledgerlens/shared && npm run build -w @ledgerlens/api && npm run build -w @ledgerlens/web",
     "test": "npm run test -w @ledgerlens/api",
+    "test:e2e": "npm run test:e2e -w @ledgerlens/e2e",
     "measure:baseline": "node scripts/measure-baseline.mjs",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:migrate": "npm run db:migrate -w @ledgerlens/api"
+    "db:migrate": "npm run db:migrate -w @ledgerlens/api",
+    "docker:build:api": "docker build -f apps/api/Dockerfile -t ledgerlens-api ."
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

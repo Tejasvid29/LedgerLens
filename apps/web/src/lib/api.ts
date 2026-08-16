@@ -29,6 +29,21 @@ export interface HoldingsResponse {
   issues: HoldingIssue[];
 }
 
+/** Mirrors apps/api/src/insights/insight-provider.interface.ts's
+ *  InsightResult plus insights.service.ts's `cached` flag — same
+ *  wire-shape-mirror reasoning as HoldingIssue above. */
+export interface InsightSummary {
+  summary: string;
+  model: string;
+  generatedAt: string;
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  cached: boolean;
+}
+
 /** Mirrors apps/api/src/wallets/transactions-query.ts's whitelist — kept as
  *  a wire-shape mirror for the same reason as HoldingIssue above. */
 export type TransactionSortField = 'timestamp' | 'chainName' | 'tokenSymbol' | 'amount' | 'direction';
@@ -122,4 +137,15 @@ export async function syncWallet(token: string, walletId: string): Promise<void>
 
 export async function deleteWallet(token: string, walletId: string): Promise<void> {
   await apiFetch(`/wallets/${walletId}`, token, { method: 'DELETE' });
+}
+
+// POST, not GET — a cache miss here calls out to a billed LLM (see
+// insights.controller.ts). Never fired on page load; only on explicit
+// user action (InsightPanel's "Generate insight" button).
+export async function generateInsight(token: string, walletId: string): Promise<InsightSummary> {
+  return apiFetch<InsightSummary>(`/wallets/${walletId}/insight`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
 }

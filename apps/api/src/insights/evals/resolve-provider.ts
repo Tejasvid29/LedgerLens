@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { StubInsightProvider } from './stub-insight.provider';
+import { StubInsightProvider } from '../stub-insight.provider';
 import { OpenAIInsightProvider } from '../openai-insight.provider';
 import { InsightProvider } from '../insight-provider.interface';
 

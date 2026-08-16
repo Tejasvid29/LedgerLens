@@ -1,6 +1,6 @@
 import { runEvals } from './harness';
 import { EVAL_CASES, EvalCategory } from './fixtures';
-import { StubInsightProvider } from './stub-insight.provider';
+import { StubInsightProvider } from '../stub-insight.provider';
 import { InsightProvider, InsightRequest, InsightResult } from '../insight-provider.interface';
 import { RECENT_TRANSACTIONS_LIMIT } from '../insights.service';
 

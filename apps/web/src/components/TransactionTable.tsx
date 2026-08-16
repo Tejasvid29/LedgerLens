@@ -68,7 +68,7 @@ export function TransactionTable({ transactions, current }: Props) {
   }
 
   return (
-    <div className="border border-rule bg-white">
+    <div className="border border-rule bg-white" data-testid="transactions-table">
       <div className="grid grid-cols-[1fr_100px_120px_140px_80px] gap-4 border-b border-rule px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink/50">
         <SortableHeader field="timestamp" label="Date" current={current} />
         <SortableHeader field="chainName" label="Chain" current={current} />
@@ -80,6 +80,7 @@ export function TransactionTable({ transactions, current }: Props) {
       {transactions.map((tx) => (
         <div
           key={tx.id}
+          data-testid="transaction-row"
           className="ledger-row grid grid-cols-[1fr_100px_120px_140px_80px] gap-4 px-4 py-2.5 text-sm"
         >
           <span className="font-mono tabular-amount text-ink/80">

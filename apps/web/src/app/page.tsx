@@ -5,6 +5,7 @@ import { TransactionTable } from '@/components/TransactionTable';
 import { TransactionFilters } from '@/components/TransactionFilters';
 import { TransactionPagination } from '@/components/TransactionPagination';
 import { SyncControls } from '@/components/SyncControls';
+import { InsightPanel } from '@/components/InsightPanel';
 import { SignOutButton } from '@/components/SignOutButton';
 import { getAuthedSession } from '@/lib/serviceAuth';
 import {
@@ -153,6 +154,8 @@ export default async function Home({ searchParams }: PageProps) {
                   neverSynced={!selected.lastSyncedAt}
                 />
               </section>
+
+              <InsightPanel walletId={selected.id} />
 
               <section>
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-3">

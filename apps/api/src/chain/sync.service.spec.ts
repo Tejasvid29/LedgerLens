@@ -1,7 +1,7 @@
 import { NormalizedTransaction } from '@ledgerlens/shared';
 import { SyncService } from './sync.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AlchemyService } from './alchemy.service';
+import { ChainProvider } from './chain-provider.interface';
 import { CHAINS } from './chain.config';
 
 function makeTx(overrides: Partial<NormalizedTransaction> = {}): NormalizedTransaction {
@@ -43,7 +43,7 @@ describe('SyncService', () => {
     alchemy = { fetchTransactions: jest.fn() };
     service = new SyncService(
       prisma as unknown as PrismaService,
-      alchemy as unknown as AlchemyService,
+      alchemy as unknown as ChainProvider,
     );
   });
 

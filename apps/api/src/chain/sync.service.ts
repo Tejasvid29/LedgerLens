@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AlchemyService } from './alchemy.service';
+import { CHAIN_PROVIDER, ChainProvider } from './chain-provider.interface';
 import { CHAINS } from './chain.config';
 
 /**
@@ -30,7 +30,7 @@ export class SyncService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly alchemy: AlchemyService,
+    @Inject(CHAIN_PROVIDER) private readonly chainProvider: ChainProvider,
   ) {}
 
   async syncWallet(walletId: string, chains?: string[]): Promise<SyncResult> {
@@ -68,7 +68,7 @@ export class SyncService {
     errors: ChainSyncError[],
   ): Promise<number> {
     try {
-      const txs = await this.alchemy.fetchTransactions(walletAddress, chainKey);
+      const txs = await this.chainProvider.fetchTransactions(walletAddress, chainKey);
 
       for (const tx of txs) {
         await this.prisma.transaction.upsert({

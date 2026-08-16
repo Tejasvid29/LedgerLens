@@ -64,6 +64,7 @@ export function AddWalletForm() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             placeholder="0x…"
+            data-testid="wallet-address-input"
             className="mt-1 w-full border border-rule bg-paper px-3 py-2 font-mono text-sm focus:border-indigo focus:outline-none"
           />
         </div>
@@ -87,6 +88,7 @@ export function AddWalletForm() {
       <button
         type="submit"
         disabled={loading}
+        data-testid="add-wallet-submit"
         className="mt-4 bg-indigo px-4 py-2 text-sm font-medium text-white hover:bg-indigo/90 disabled:opacity-50"
       >
         {loading ? 'Adding…' : 'Add wallet'}

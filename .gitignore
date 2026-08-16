@@ -9,3 +9,9 @@ dist/
 coverage/
 .turbo/
 *.tsbuildinfo
+
+# Playwright (apps/e2e)
+apps/e2e/.auth/
+apps/e2e/test-results/
+apps/e2e/playwright-report/
+apps/e2e/playwright/.cache/

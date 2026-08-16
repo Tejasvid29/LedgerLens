@@ -44,6 +44,7 @@ export function SyncControls({ walletId }: Props) {
         <button
           onClick={handleSync}
           disabled={syncing}
+          data-testid="sync-button"
           className="border border-indigo px-3 py-1.5 text-sm text-indigo hover:bg-indigo/5 disabled:opacity-50"
         >
           {syncing ? 'Syncing…' : 'Sync from chain'}

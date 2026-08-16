@@ -56,3 +56,4 @@ export interface SerializedHolding {
 export { formatAmount } from './amounts';
 export { isValidAddress } from './address';
 export { signServiceToken, verifyServiceToken, type ServiceTokenPayload } from './serviceToken';
+export { E2E_FIXTURE_ADDRESS, E2E_TEST_EMAIL } from './e2eFixtures';

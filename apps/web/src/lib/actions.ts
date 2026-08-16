@@ -3,7 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getAuthedSession } from './serviceAuth';
-import { createWallet, syncWallet, deleteWallet, type WalletSummary } from './api';
+import {
+  createWallet,
+  syncWallet,
+  deleteWallet,
+  generateInsight,
+  type WalletSummary,
+  type InsightSummary,
+} from './api';
 
 /**
  * Client components (AddWalletForm, SyncControls, RemoveWalletButton)
@@ -38,4 +45,15 @@ export async function deleteWalletAction(walletId: string): Promise<void> {
 
   await deleteWallet(session.token, walletId);
   revalidatePath('/');
+}
+
+// No revalidatePath: unlike the mutations above, an insight isn't stored
+// wallet state the rest of the page reads — it's a one-off response the
+// caller (InsightPanel) holds in its own client state and displays
+// directly. Refreshing the page would just throw it away.
+export async function generateInsightAction(walletId: string): Promise<InsightSummary> {
+  const session = await getAuthedSession();
+  if (!session) redirect('/login');
+
+  return generateInsight(session.token, walletId);
 }
