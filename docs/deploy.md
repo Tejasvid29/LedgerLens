@@ -48,7 +48,7 @@ Originally scoped for AWS ECS — the Dockerfile and ECS task definition still e
 
 1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo** → pick this repo.
 2. Railway will try to auto-detect a service from the repo root — delete that first guess if it picks the wrong thing; you want one service pointed specifically at the API.
-3. On that service: **Settings → Build** → set **Builder** to `Dockerfile`, **Dockerfile Path** to `apps/api/Dockerfile`, and **Docker Build Context** to the repo root (`.`) — the Dockerfile needs the whole monorepo's `package.json` files, not just `apps/api`'s (see the Dockerfile's own comments).
+3. The builder is pinned in code, not in the dashboard: `railway.json` at the repo root sets `build.builder: "DOCKERFILE"` and `build.dockerfilePath: "apps/api/Dockerfile"`. Railway's config-as-code always overrides dashboard/Railpack auto-detection, so no manual "Settings → Build" step is needed — the service just needs to exist and be connected to this repo. Root Directory should stay at its default (repo root) since the Dockerfile's build context needs the whole monorepo's `package.json` files, not just `apps/api`'s (see the Dockerfile's own comments).
 4. **Settings → Networking** → note the public domain Railway assigns (or add a custom one) — this is your API's public URL, used as `API_URL` in Vercel and as the redirect target nowhere else (the API has no redirect-based auth, only the signed-token scheme from S12).
 
 ### 2.2 — Add Postgres and Redis
@@ -75,7 +75,7 @@ Still on the API service's **Variables** tab:
 | `PORT` | `3001` (Railway sets its own `PORT` by default for some builders, but since this is a Dockerfile build, the container's own `EXPOSE 3001`/`app.listen` wins — set this explicitly so Railway's health check hits the right port) |
 | `SENTRY_DSN` | from Sentry (Part 3), optional |
 
-**Settings → Networking → Health Check Path**: `/health` (see `apps/api/src/health/health.controller.ts` — deliberately touches no dependency, so a momentary Postgres/Redis blip doesn't make Railway kill a healthy container).
+Health check path is also pinned in `railway.json` (`deploy.healthcheckPath: "/health"`) — see `apps/api/src/health/health.controller.ts` — deliberately touches no dependency, so a momentary Postgres/Redis blip doesn't make Railway kill a healthy container. No dashboard step needed.
 
 ### 2.4 — Deploy, then run migrations once
 
