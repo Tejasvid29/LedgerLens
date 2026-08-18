@@ -67,9 +67,10 @@ Still on the API service's **Variables** tab:
 
 | Variable | Value |
 |---|---|
-| `ALCHEMY_API_KEY` | from [dashboard.alchemy.com](https://dashboard.alchemy.com) |
-| `LLM_PROVIDER` | `openai` |
-| `OPENAI_API_KEY` | from [platform.openai.com](https://platform.openai.com) — a separate account/billing from a ChatGPT subscription, see S14/S15 |
+| `ALCHEMY_API_KEY` | from [dashboard.alchemy.com](https://dashboard.alchemy.com) — enable all 6 chains under that app's Networks tab, not just Ethereum, or syncs on the other 5 fail with a 403 |
+| `LLM_PROVIDER` | `groq` (free, no billing) or `openai` (billed, needs a funded account) |
+| `GROQ_API_KEY` | if using `groq` — from [console.groq.com](https://console.groq.com), no credit card needed |
+| `OPENAI_API_KEY` | if using `openai` — from [platform.openai.com](https://platform.openai.com), a separate account/billing from a ChatGPT subscription, see S14/S15. Needs an actual funded balance — OpenAI's free trial credits are gone for new accounts, and a $0 balance fails with `429 insufficient_quota` |
 | `API_AUTH_SECRET` | must match Vercel's `API_AUTH_SECRET` exactly — `openssl rand -base64 32` |
 | `CORS_ORIGIN` | your Vercel production URL from Part 1, e.g. `https://ledgerlens.vercel.app` |
 | `PORT` | `3001` (Railway sets its own `PORT` by default for some builders, but since this is a Dockerfile build, the container's own `EXPOSE 3001`/`app.listen` wins — set this explicitly so Railway's health check hits the right port) |
