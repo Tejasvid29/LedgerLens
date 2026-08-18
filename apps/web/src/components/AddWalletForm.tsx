@@ -91,8 +91,13 @@ export function AddWalletForm() {
         data-testid="add-wallet-submit"
         className="mt-4 bg-indigo px-4 py-2 text-sm font-medium text-white hover:bg-indigo/90 disabled:opacity-50"
       >
-        {loading ? 'Adding…' : 'Add wallet'}
+        {loading ? 'Adding & syncing across 6 chains…' : 'Add wallet'}
       </button>
+      {loading && (
+        <p className="mt-2 text-xs text-ink/40">
+          Pulling live history — usually a few seconds, occasionally longer.
+        </p>
+      )}
     </form>
   );
 }

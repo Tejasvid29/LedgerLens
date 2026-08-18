@@ -17,6 +17,17 @@ import { queryTransactions, SortDirection, TransactionSortField } from './transa
 import { ServiceAuthGuard } from '../auth/service-auth.guard';
 import { CurrentUser, AuthedUser } from '../auth/current-user.decorator';
 
+/**
+ * A well-known, real address (Vitalik Buterin's, publicly identified as
+ * such) with genuine multi-chain history — read-only, no keys, same as any
+ * address a real user pastes in (see CLAUDE.md rule 2). Seeded once per
+ * brand-new user (see list() below) so a recruiter signing in for the
+ * first time sees real holdings/transactions immediately instead of an
+ * empty "No wallets yet" state, without needing to know an address to try.
+ */
+const DEMO_WALLET_ADDRESS = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+const DEMO_WALLET_LABEL = 'Demo — Vitalik.eth';
+
 @Controller('wallets')
 export class WalletsController {
   constructor(
@@ -37,8 +48,32 @@ export class WalletsController {
 
   @Get()
   @UseGuards(ServiceAuthGuard)
-  list(@CurrentUser() user: AuthedUser) {
+  async list(@CurrentUser() user: AuthedUser) {
+    if (user.isNew) {
+      await this.seedDemoWallet(user.id);
+    }
     return this.wallets.list(user.id);
+  }
+
+  /**
+   * Runs once, ever, per user — gated by ServiceAuthGuard's isNew flag
+   * (true only on the request that first created this user's row). Awaits
+   * the sync (not fire-and-forget) so the very first page a new user sees
+   * already has real data, not an empty "Never synced" wallet — a one-time
+   * cost on account creation, covered by loading.tsx same as any other
+   * slow first render. A sync failure here must not break sign-in itself:
+   * the demo wallet still exists, just unsynced, same as if a real user's
+   * first sync attempt failed.
+   */
+  private async seedDemoWallet(userId: string): Promise<void> {
+    const wallet = await this.wallets.create(userId, DEMO_WALLET_ADDRESS, DEMO_WALLET_LABEL);
+    try {
+      await this.syncService.syncWallet(wallet.id);
+    } catch {
+      // Fall through — list() still returns the wallet, just unsynced.
+      // The user can hit "Sync from chain" themselves, same as any wallet
+      // whose first sync attempt failed.
+    }
   }
 
   @Post()

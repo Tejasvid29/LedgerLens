@@ -22,7 +22,9 @@ describe('ServiceAuthGuard', () => {
   beforeEach(() => {
     config = { getOrThrow: jest.fn().mockReturnValue(SECRET) };
     users = {
-      findOrCreateByEmail: jest.fn().mockResolvedValue({ id: 'u1', email: 'a@example.com' }),
+      findOrCreateByEmail: jest
+        .fn()
+        .mockResolvedValue({ user: { id: 'u1', email: 'a@example.com' }, isNew: false }),
     };
     guard = new ServiceAuthGuard(config as unknown as ConfigService, users as unknown as UsersService);
   });
@@ -61,6 +63,17 @@ describe('ServiceAuthGuard', () => {
 
     expect(result).toBe(true);
     expect(users.findOrCreateByEmail).toHaveBeenCalledWith('a@example.com');
-    expect(request.user).toEqual({ id: 'u1', email: 'a@example.com' });
+    expect(request.user).toEqual({ id: 'u1', email: 'a@example.com', isNew: false });
+  });
+
+  it('attaches isNew: true when UsersService reports a first-ever request for this email', async () => {
+    users.findOrCreateByEmail.mockResolvedValue({ user: { id: 'u2', email: 'b@example.com' }, isNew: true });
+    const token = signServiceToken({ sub: 'b@example.com', email: 'b@example.com' }, SECRET);
+    const request = { headers: { authorization: `Bearer ${token}` }, user: undefined as unknown };
+    const context = { switchToHttp: () => ({ getRequest: () => request }) } as unknown as ExecutionContext;
+
+    await guard.canActivate(context);
+
+    expect(request.user).toEqual({ id: 'u2', email: 'b@example.com', isNew: true });
   });
 });

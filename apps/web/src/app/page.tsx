@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { HoldingsSummary } from '@/components/HoldingsSummary';
-import { TransactionTable } from '@/components/TransactionTable';
+import { TransactionsList } from '@/components/TransactionsList';
 import { TransactionFilters } from '@/components/TransactionFilters';
-import { TransactionPagination } from '@/components/TransactionPagination';
 import { SyncControls } from '@/components/SyncControls';
 import { InsightPanel } from '@/components/InsightPanel';
 import { SignOutButton } from '@/components/SignOutButton';
@@ -21,7 +20,11 @@ import {
 } from '@/lib/api';
 import type { TransactionUrlState } from '@/lib/transactionUrl';
 
-const TRANSACTIONS_PAGE_SIZE = 25;
+// Kept small deliberately: a wallet with a very large transaction history
+// (millions of rows in the extreme) must never mean fetching, caching, or
+// rendering all of it at once — see TransactionsList's "Load more" button,
+// which fetches this many additional rows at a time instead.
+const TRANSACTIONS_PAGE_SIZE = 20;
 
 interface PageProps {
   searchParams: {
@@ -168,12 +171,17 @@ export default async function Home({ searchParams }: PageProps) {
                     tokens={txResponse.filters.tokens}
                   />
                 </div>
-                <TransactionTable transactions={txResponse.transactions} current={currentTxUrl} />
-                <TransactionPagination
-                  current={currentTxUrl}
-                  page={txResponse.page}
-                  pageSize={txResponse.pageSize}
+                <TransactionsList
+                  // Remounts with fresh state whenever wallet/filter/sort
+                  // changes navigate to a new URL — without this, switching
+                  // filters would append onto a now-stale accumulated list
+                  // instead of starting over from the new first page.
+                  key={JSON.stringify(currentTxUrl)}
+                  walletId={selected.id}
+                  initialTransactions={txResponse.transactions}
                   total={txResponse.total}
+                  pageSize={TRANSACTIONS_PAGE_SIZE}
+                  current={currentTxUrl}
                 />
               </section>
             </>

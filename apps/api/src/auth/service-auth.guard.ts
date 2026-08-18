@@ -30,8 +30,8 @@ export class ServiceAuthGuard implements CanActivate {
     const payload = verifyServiceToken(token, secret);
     if (!payload) throw new UnauthorizedException('Invalid or expired session.');
 
-    const user = await this.users.findOrCreateByEmail(payload.email);
-    request.user = { id: user.id, email: user.email };
+    const { user, isNew } = await this.users.findOrCreateByEmail(payload.email);
+    request.user = { id: user.id, email: user.email, isNew };
     return true;
   }
 }
