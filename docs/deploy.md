@@ -80,14 +80,21 @@ Health check path is also pinned in `railway.json` (`deploy.healthcheckPath: "/h
 ### 2.4 — Deploy, then run migrations once
 
 1. Trigger the first deploy (Railway does this automatically once the service and its env vars are set).
-2. Migrations aren't run on container boot (see the Dockerfile's comment on why — avoids multiple instances racing to migrate). Run them once, from your machine, against Railway's Postgres:
+2. Migrations aren't run on container boot (see the Dockerfile's comment on why — avoids multiple instances racing to migrate). Run them once, from your machine, against Railway's Postgres. `railway run` injects the linked service's env vars, but `DATABASE_URL` resolves to Postgres's *private* `postgres.railway.internal` hostname, which only works from inside Railway's network — not from your laptop. Use a tunnel instead, in two terminals:
    ```
    npm install -g @railway/cli   # if you don't have it
    railway login
    railway link                  # pick this project
-   railway run npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+
+   # terminal 1 — leave running
+   railway connect Postgres --tunnel-only
+   # prints a local host/port + the same credentials as DATABASE_URL
+
+   # terminal 2 — use the printed local port
+   DATABASE_URL="postgresql://postgres:<password>@127.0.0.1:<port>/railway" \
+     npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
    ```
-   `railway run` executes the command locally with the linked project's env vars injected — including `DATABASE_URL` — so this reaches Railway's Postgres without you ever handling the raw connection string.
+   This reaches Railway's Postgres over an encrypted tunnel without ever exposing the database publicly.
 3. Future migrations: same command, any time you add one, before or right after pushing the schema change (Railway redeploys on every push to the connected branch automatically — there's no separate CD workflow to wire up here, unlike the AWS path).
 
 ---

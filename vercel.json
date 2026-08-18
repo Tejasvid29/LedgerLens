@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build -w @ledgerlens/shared && npm run build -w @ledgerlens/web",
+  "devCommand": "npm run dev -w @ledgerlens/web",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "outputDirectory": "apps/web/.next"
+}
