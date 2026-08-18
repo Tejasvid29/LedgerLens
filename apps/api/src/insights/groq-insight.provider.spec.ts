@@ -63,7 +63,7 @@ describe('GroqInsightProvider', () => {
     const result = await provider.generateInsight(makeRequest());
 
     expect(result.summary).toBe('Summary text.');
-    expect(result.model).toBe('llama-3.3-70b-versatile');
+    expect(result.model).toBe('openai/gpt-oss-120b');
     expect(() => new Date(result.generatedAt).toISOString()).not.toThrow();
   });
 

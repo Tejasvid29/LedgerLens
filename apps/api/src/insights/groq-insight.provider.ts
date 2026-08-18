@@ -4,7 +4,10 @@ import { InsightProvider, InsightRequest, InsightResult } from './insight-provid
 import { buildInsightPrompt } from './prompt';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+// Groq deprecates models on notice — check console.groq.com/docs/models if
+// this ever 404s with "model_not_found" again. openai/gpt-oss-120b is the
+// current flagship production-tier model there (checked 2026-08-17).
+const MODEL = 'openai/gpt-oss-120b';
 
 /**
  * Free alternative to OpenAIInsightProvider — Groq's Chat Completions API
